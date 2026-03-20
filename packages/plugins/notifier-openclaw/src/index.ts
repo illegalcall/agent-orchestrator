@@ -109,6 +109,8 @@ function formatActionsLine(actions: NotifyAction[]): string {
 }
 
 export function create(config?: Record<string, unknown>): Notifier {
+  console.log('[notifier-openclaw] hello from Clawww');
+
   const url =
     (typeof config?.url === "string" ? config.url : undefined) ??
     "http://127.0.0.1:18789/hooks/agent";
