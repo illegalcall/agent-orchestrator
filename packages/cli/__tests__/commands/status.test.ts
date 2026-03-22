@@ -830,4 +830,53 @@ describe("status command", () => {
       project: "my-app",
     });
   });
+
+  it("--quiet outputs one session name per line with no other output", async () => {
+    mockSessionManager.list.mockResolvedValue([
+      makeSession({ id: "app-1", projectId: "my-app", branch: "feat/a" }),
+      makeSession({ id: "app-2", projectId: "my-app", branch: "feat/b" }),
+    ]);
+    mockGit.mockResolvedValue(null);
+
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+    const calls = consoleSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual(["app-1", "app-2"]);
+  });
+
+  it("--quiet outputs nothing when there are no sessions", async () => {
+    mockSessionManager.list.mockResolvedValue([]);
+    mockGit.mockResolvedValue(null);
+
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+    expect(consoleSpy).not.toHaveBeenCalled();
+  });
+
+  it("--quiet works with -q shorthand", async () => {
+    mockSessionManager.list.mockResolvedValue([
+      makeSession({ id: "app-42", projectId: "my-app", branch: "feat/q" }),
+    ]);
+    mockGit.mockResolvedValue(null);
+
+    await program.parseAsync(["node", "test", "status", "-q"]);
+
+    const calls = consoleSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toEqual(["app-42"]);
+  });
+
+  it("--quiet does not print banner, header, or table", async () => {
+    mockSessionManager.list.mockResolvedValue([
+      makeSession({ id: "app-1", projectId: "my-app", branch: "feat/a" }),
+    ]);
+    mockGit.mockResolvedValue(null);
+
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).not.toContain("AGENT ORCHESTRATOR STATUS");
+    expect(output).not.toContain("Session");
+    expect(output).not.toContain("Branch");
+    expect(output).not.toContain("active session");
+  });
 });

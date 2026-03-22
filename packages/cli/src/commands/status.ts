@@ -210,11 +210,16 @@ export function registerStatus(program: Command): void {
     .description("Show all sessions with branch, activity, PR, and CI status")
     .option("-p, --project <id>", "Filter by project ID")
     .option("--json", "Output as JSON")
-    .action(async (opts: { project?: string; json?: boolean }) => {
+    .option("-q, --quiet", "Output only session names, one per line (for scripting)")
+    .action(async (opts: { project?: string; json?: boolean; quiet?: boolean }) => {
       let config: ReturnType<typeof loadConfig>;
       try {
         config = loadConfig();
       } catch {
+        if (opts.quiet) {
+          // In quiet mode, no config means no sessions — output nothing
+          return;
+        }
         console.log(chalk.yellow("No config found. Run `ao init` first."));
         console.log(chalk.dim("Falling back to session discovery...\n"));
         await showFallbackStatus();
@@ -229,6 +234,13 @@ export function registerStatus(program: Command): void {
       // Use session manager to list sessions (metadata-based, not tmux-based)
       const sm = await getSessionManager(config);
       const sessions = await sm.list(opts.project);
+
+      if (opts.quiet) {
+        for (const s of sessions) {
+          console.log(s.id);
+        }
+        return;
+      }
 
       if (!opts.json) {
         console.log(banner("AGENT ORCHESTRATOR STATUS"));
