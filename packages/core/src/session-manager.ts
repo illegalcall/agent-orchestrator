@@ -12,10 +12,9 @@
  */
 
 import { statSync, existsSync, readdirSync, writeFileSync, mkdirSync, utimesSync } from "node:fs";
-import { execFile } from "node:child_process";
 import { basename, join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { promisify } from "node:util";
+import { runCmd } from "./utils/run-cmd.js";
 import {
   isIssueNotFoundError,
   isRestorable,
@@ -75,7 +74,6 @@ import { sessionFromMetadata } from "./utils/session-from-metadata.js";
 import { safeJsonParse } from "./utils/validation.js";
 import { resolveAgentSelection, resolveSessionRole } from "./agent-selection.js";
 
-const execFileAsync = promisify(execFile);
 const OPENCODE_DISCOVERY_TIMEOUT_MS = 2_000;
 const OPENCODE_INTERACTIVE_DISCOVERY_TIMEOUT_MS = 10_000;
 
@@ -96,7 +94,7 @@ async function deleteOpenCodeSession(sessionId: string): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     try {
-      await execFileAsync("opencode", ["session", "delete", validatedSessionId], {
+      await runCmd("opencode", ["session", "delete", validatedSessionId], {
         timeout: 30_000,
       });
       return;
@@ -120,7 +118,7 @@ async function fetchOpenCodeSessionList(
   timeoutMs = OPENCODE_DISCOVERY_TIMEOUT_MS,
 ): Promise<OpenCodeSessionListEntry[]> {
   try {
-    const { stdout } = await execFileAsync("opencode", ["session", "list", "--format", "json"], {
+    const { stdout } = await runCmd("opencode", ["session", "list", "--format", "json"], {
       timeout: timeoutMs,
     });
     const parsed = safeJsonParse<unknown>(stdout);
@@ -230,7 +228,7 @@ function sleep(ms: number): Promise<void> {
 
 async function getTmuxForegroundCommand(sessionName: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync(
+    const { stdout } = await runCmd(
       "tmux",
       ["display-message", "-p", "-t", sessionName, "#{pane_current_command}"],
       { timeout: 5_000 },
@@ -629,7 +627,7 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
 
   async function listRemoteSessionNumbers(project: ProjectConfig): Promise<number[]> {
     try {
-      const { stdout } = await execFileAsync(
+      const { stdout } = await runCmd(
         "git",
         ["ls-remote", "--heads", "origin", `session/${project.sessionPrefix}-*`],
         {
