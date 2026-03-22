@@ -37,6 +37,8 @@ interface SessionInfo {
   prNumber: number | null;
   issue: string | null;
   lastActivity: string;
+  /** Human-readable session age since createdAt (e.g. "5m ago", "2h ago") */
+  age: string;
   project: string | null;
   ciStatus: CIStatus | null;
   reviewDecision: ReviewDecision | null;
@@ -67,6 +69,9 @@ async function gatherSessionInfo(
   const tmuxTarget = session.runtimeHandle?.id ?? session.id;
   const activityTs = await getTmuxActivity(tmuxTarget);
   const lastActivity = activityTs ? formatAge(activityTs) : "-";
+
+  // Calculate session age from createdAt
+  const age = formatAge(session.createdAt.getTime());
 
   // Get agent's auto-generated summary via introspection
   let claudeSummary: string | null = null;
@@ -129,6 +134,7 @@ async function gatherSessionInfo(
     prNumber,
     issue,
     lastActivity,
+    age,
     project: session.projectId,
     ciStatus,
     reviewDecision,
@@ -181,7 +187,7 @@ function printSessionRow(info: SessionInfo): void {
       COL.threads,
     ) +
     padCol(activityIcon(info.activity), COL.activity) +
-    chalk.dim(info.lastActivity);
+    chalk.dim(info.age);
 
   console.log(`  ${row}`);
 
