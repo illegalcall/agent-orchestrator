@@ -14,6 +14,20 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+/**
+ * Build a PATH string that places `binDir` first and strips any system
+ * directories that contain an `ao` binary.  This prevents a globally-installed
+ * `ao` (e.g. /usr/local/bin/ao) from masking the absence of the launcher
+ * inside the fake bin directory during tests that exercise the launcher-fix
+ * code path.
+ */
+function buildIsolatedPath(binDir: string): string {
+  const systemPaths = (process.env["PATH"] ?? "")
+    .split(":")
+    .filter((p) => p.length > 0 && !existsSync(join(p, "ao")));
+  return [binDir, ...systemPaths].join(":");
+}
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const scriptPath = join(repoRoot, "scripts", "ao-doctor.sh");
 
@@ -149,7 +163,7 @@ describe("scripts/ao-doctor.sh", () => {
     const result = spawnSync("bash", [scriptPath, "--fix"], {
       env: {
         ...process.env,
-        PATH: `${binDir}:${process.env.PATH || ""}`,
+        PATH: buildIsolatedPath(binDir),
         AO_REPO_ROOT: fakeRepo,
         AO_CONFIG_PATH: configPath,
         AO_DOCTOR_TMP_ROOT: tmpRoot,
