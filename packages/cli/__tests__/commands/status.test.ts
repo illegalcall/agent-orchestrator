@@ -798,6 +798,77 @@ describe("status command", () => {
     expect(output).toContain("1 active session across 2 projects · 2 orchestrators");
   });
 
+  describe("--quiet flag", () => {
+    it("outputs only session names, one per line", async () => {
+      mockSessionManager.list.mockResolvedValue([
+        makeSession({ id: "app-1", projectId: "my-app", branch: "feat/a" }),
+        makeSession({ id: "app-2", projectId: "my-app", branch: "feat/b" }),
+        makeSession({ id: "app-3", projectId: "my-app", branch: "feat/c" }),
+      ]);
+      mockGit.mockResolvedValue(null);
+
+      await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+      const lines = consoleSpy.mock.calls.map((c) => c[0] as string);
+      expect(lines).toEqual(["app-1", "app-2", "app-3"]);
+    });
+
+    it("outputs nothing when there are no sessions", async () => {
+      mockSessionManager.list.mockResolvedValue([]);
+      mockGit.mockResolvedValue(null);
+
+      await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+      expect(consoleSpy).not.toHaveBeenCalled();
+    });
+
+    it("does not print banner or table headers in quiet mode", async () => {
+      mockSessionManager.list.mockResolvedValue([
+        makeSession({ id: "app-1", projectId: "my-app", branch: "feat/a" }),
+      ]);
+      mockGit.mockResolvedValue(null);
+
+      await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+      const output = consoleSpy.mock.calls.map((c) => c[0] as string).join("\n");
+      expect(output).not.toContain("AGENT ORCHESTRATOR STATUS");
+      expect(output).not.toContain("Session");
+      expect(output).not.toContain("Branch");
+      expect(output).toBe("app-1");
+    });
+
+    it("includes orchestrators in quiet output", async () => {
+      mockSessionManager.list.mockResolvedValue([
+        makeSession({
+          id: "app-orchestrator",
+          projectId: "my-app",
+          metadata: { role: "orchestrator" },
+        }),
+        makeSession({ id: "app-1", projectId: "my-app", branch: "feat/a" }),
+      ]);
+      mockGit.mockResolvedValue(null);
+
+      await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+      const lines = consoleSpy.mock.calls.map((c) => c[0] as string);
+      expect(lines).toContain("app-orchestrator");
+      expect(lines).toContain("app-1");
+      expect(lines).toHaveLength(2);
+    });
+
+    it("supports -q short form", async () => {
+      mockSessionManager.list.mockResolvedValue([
+        makeSession({ id: "ao-1-fix-json", projectId: "my-app", branch: "fix/json" }),
+      ]);
+      mockGit.mockResolvedValue(null);
+
+      await program.parseAsync(["node", "test", "status", "-q"]);
+
+      const lines = consoleSpy.mock.calls.map((c) => c[0] as string);
+      expect(lines).toEqual(["ao-1-fix-json"]);
+    });
+  });
+
   it("includes orchestrators in JSON output with explicit roles", async () => {
     mockSessionManager.list.mockResolvedValue([
       makeSession({
