@@ -6,12 +6,13 @@ import { isOrchestratorSession } from "@composio/ao-core/types";
 import { SessionDetail } from "@/components/SessionDetail";
 import { type DashboardSession, getAttentionLevel, type AttentionLevel } from "@/lib/types";
 import { activityIcon } from "@/lib/activity-icons";
+import type { SessionMeta } from "@/app/api/sessions/[id]/meta/route";
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + "..." : s;
 }
 
-/** Build a descriptive tab title from session data. */
+/** Build a descriptive tab title from full session data. */
 function buildSessionTitle(session: DashboardSession): string {
   const id = session.id;
   const emoji = session.activity ? (activityIcon[session.activity] ?? "") : "";
@@ -30,6 +31,25 @@ function buildSessionTitle(session: DashboardSession): string {
   }
 
   return emoji ? `${emoji} ${id} | ${detail}` : `${id} | ${detail}`;
+}
+
+/** Build a descriptive tab title from lightweight session metadata (no enrichment). */
+function buildTitleFromMeta(meta: SessionMeta): string {
+  const emoji = meta.activity ? (activityIcon[meta.activity] ?? "") : "";
+
+  let detail: string;
+
+  if (meta.isOrchestrator) {
+    detail = "Orchestrator Terminal";
+  } else if (meta.pr) {
+    detail = `#${meta.pr.number} ${truncate(meta.pr.branch, 30)}`;
+  } else if (meta.branch) {
+    detail = truncate(meta.branch, 30);
+  } else {
+    detail = "Session Detail";
+  }
+
+  return emoji ? `${emoji} ${meta.id} | ${detail}` : `${meta.id} | ${detail}`;
 }
 
 interface ZoneCounts {
@@ -52,14 +72,29 @@ export default function SessionPage() {
   const sessionProjectId = session?.projectId ?? null;
   const sessionIsOrchestrator = session ? isOrchestratorSession(session) : false;
 
-  // Update document title based on session data
+  // Phase 1: Fetch lightweight metadata immediately to set a useful tab title
+  // before the full enriched session data (which requires SCM API calls) arrives.
+  useEffect(() => {
+    document.title = `${id} | Session Detail`;
+
+    fetch(`/api/sessions/${encodeURIComponent(id)}/meta`)
+      .then((res) => (res.ok ? (res.json() as Promise<SessionMeta>) : null))
+      .then((meta) => {
+        if (meta) {
+          document.title = buildTitleFromMeta(meta);
+        }
+      })
+      .catch(() => {
+        // Non-critical — title will be updated when full session data loads
+      });
+  }, [id]);
+
+  // Phase 2: Update document title from full session data once enrichment completes
   useEffect(() => {
     if (session) {
       document.title = buildSessionTitle(session);
-    } else {
-      document.title = `${id} | Session Detail`;
     }
-  }, [session, id]);
+  }, [session]);
 
   // Fetch session data (memoized to avoid recreating on every render)
   const fetchSession = useCallback(async () => {
