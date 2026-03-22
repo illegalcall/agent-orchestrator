@@ -112,6 +112,44 @@ describe("scripts/ao-doctor.sh", () => {
     expect(result.stdout).toContain("Environment looks healthy");
   });
 
+  it("auto-creates missing config directories without --fix", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "ao-doctor-autofix-"));
+    const fakeRepo = createHealthyRepo(tempRoot);
+    const binDir = join(tempRoot, "bin");
+    mkdirSync(binDir, { recursive: true });
+    createHealthyPath(binDir);
+
+    const configPath = join(tempRoot, "agent-orchestrator.yaml");
+    const dataDir = join(tempRoot, "data");
+    const worktreeDir = join(tempRoot, "worktrees");
+    // Intentionally do NOT pre-create dataDir and worktreeDir
+    writeFileSync(
+      configPath,
+      [`dataDir: ${dataDir}`, `worktreeDir: ${worktreeDir}`, "projects: {}"].join("\n"),
+    );
+
+    const result = spawnSync("bash", [scriptPath], {
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH || ""}`,
+        AO_REPO_ROOT: fakeRepo,
+        AO_CONFIG_PATH: configPath,
+      },
+      encoding: "utf8",
+    });
+
+    const dataDirCreated = existsSync(dataDir);
+    const worktreeDirCreated = existsSync(worktreeDir);
+    rmSync(tempRoot, { recursive: true, force: true });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("FIXED");
+    expect(result.stdout).toContain("metadata directory created");
+    expect(result.stdout).toContain("worktree directory created");
+    expect(dataDirCreated).toBe(true);
+    expect(worktreeDirCreated).toBe(true);
+  });
+
   it("applies safe fixes for missing launcher, missing dirs, and stale temp files", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "ao-doctor-fix-"));
     const fakeRepo = createHealthyRepo(tempRoot);
@@ -149,7 +187,9 @@ describe("scripts/ao-doctor.sh", () => {
     const result = spawnSync("bash", [scriptPath, "--fix"], {
       env: {
         ...process.env,
-        PATH: `${binDir}:${process.env.PATH || ""}`,
+        // Use a restricted PATH so the real system 'ao' (e.g. /usr/local/bin/ao)
+        // is not visible — only our fake binaries in binDir are found.
+        PATH: `${binDir}:/bin:/usr/bin`,
         AO_REPO_ROOT: fakeRepo,
         AO_CONFIG_PATH: configPath,
         AO_DOCTOR_TMP_ROOT: tmpRoot,
