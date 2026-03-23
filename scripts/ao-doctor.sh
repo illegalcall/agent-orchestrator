@@ -118,16 +118,12 @@ ensure_dir() {
     return 0
   fi
 
-  if [ "$FIX_MODE" = true ]; then
-    if mkdir -p "$dir_path"; then
-      fixed "$label created at $dir_path"
-      return 0
-    fi
-    fail "$label could not be created at $dir_path. Fix: $fix_hint"
-    return 1
+  if mkdir -p "$dir_path"; then
+    fixed "$label created at $dir_path"
+    return 0
   fi
-
-  warn "$label is missing at $dir_path. Fix: $fix_hint"
+  fail "$label could not be created at $dir_path. Fix: $fix_hint"
+  return 1
 }
 
 check_command() {
