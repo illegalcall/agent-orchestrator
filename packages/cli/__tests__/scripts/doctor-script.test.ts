@@ -14,6 +14,23 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+/**
+ * Build an isolated PATH by prepending `binDir` and stripping any existing
+ * PATH entries that contain an `ao` binary.  This prevents a globally-installed
+ * `ao` (e.g. /usr/local/bin/ao) from leaking into the doctor-script tests and
+ * causing the "launcher absent" code path to be skipped.
+ */
+function buildIsolatedPath(binDir: string): string {
+  const systemEntries = (process.env.PATH ?? "").split(":").filter((entry) => {
+    if (!entry) return false;
+    // Drop any directory that contains an `ao` executable so that
+    // `command -v ao` inside ao-doctor.sh cannot find a system-wide binary.
+    const result = spawnSync("test", ["-x", join(entry, "ao")], { encoding: "utf8" });
+    return result.status !== 0;
+  });
+  return [binDir, ...systemEntries].join(":");
+}
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const scriptPath = join(repoRoot, "scripts", "ao-doctor.sh");
 
@@ -149,7 +166,7 @@ describe("scripts/ao-doctor.sh", () => {
     const result = spawnSync("bash", [scriptPath, "--fix"], {
       env: {
         ...process.env,
-        PATH: `${binDir}:${process.env.PATH || ""}`,
+        PATH: buildIsolatedPath(binDir),
         AO_REPO_ROOT: fakeRepo,
         AO_CONFIG_PATH: configPath,
         AO_DOCTOR_TMP_ROOT: tmpRoot,
