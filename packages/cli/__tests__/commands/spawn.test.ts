@@ -444,6 +444,39 @@ describe("spawn command", () => {
     expect(mockSessionManager.claimPR).not.toHaveBeenCalled();
   });
 
+  it("shows dry-run output without spawning", async () => {
+    await program.parseAsync(["node", "test", "spawn", "INT-42", "--dry-run"]);
+
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockEnsureLifecycleWorker).not.toHaveBeenCalled();
+
+    const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(output).toContain("Dry run");
+    expect(output).toContain("my-app");
+    expect(output).toContain("INT-42");
+  });
+
+  it("shows agent override in dry-run output", async () => {
+    await program.parseAsync(["node", "test", "spawn", "INT-42", "--dry-run", "--agent", "codex"]);
+
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+
+    const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(output).toContain("Dry run");
+    expect(output).toContain("codex");
+  });
+
+  it("shows claim-pr in dry-run output", async () => {
+    await program.parseAsync(["node", "test", "spawn", "--dry-run", "--claim-pr", "99"]);
+
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockSessionManager.claimPR).not.toHaveBeenCalled();
+
+    const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(output).toContain("Dry run");
+    expect(output).toContain("99");
+  });
+
   it("reports claim failures after creating the session", async () => {
     const fakeSession: Session = {
       id: "app-1",

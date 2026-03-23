@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design Doc: GitHub API Rate Limit Optimization</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --orange: #d29922;
+      --purple: #bc8cff;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      padding: 2rem;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    h1 { font-size: 2rem; margin-bottom: 0.5rem; color: var(--accent); }
+    h2 { font-size: 1.5rem; margin: 2rem 0 1rem; color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+    h3 { font-size: 1.2rem; margin: 1.5rem 0 0.75rem; color: var(--purple); }
+    p { margin-bottom: 1rem; color: var(--text-muted); }
+    .meta { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 2rem; }
+    .meta span { color: var(--accent); }
+
+    /* Status badge */
+    .status {
+      display: inline-block;
+      padding: 0.2rem 0.75rem;
+      border-radius: 2rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: rgba(88, 166, 255, 0.15);
+      color: var(--accent);
+      margin-left: 0.5rem;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .card.problem { border-left: 4px solid var(--red); }
+    .card.solution { border-left: 4px solid var(--green); }
+    .card.info { border-left: 4px solid var(--accent); }
+    .card.warning { border-left: 4px solid var(--orange); }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.9rem;
+    }
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+    th {
+      background: var(--surface);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    td { color: var(--text-muted); }
+    tr:hover td { background: rgba(88, 166, 255, 0.05); }
+    .num { text-align: right; font-family: 'SF Mono', monospace; }
+    .good { color: var(--green); font-weight: 600; }
+    .bad { color: var(--red); font-weight: 600; }
+    .warn { color: var(--orange); font-weight: 600; }
+
+    /* Code blocks */
+    pre {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      margin: 1rem 0;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    code {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      color: var(--text);
+    }
+    .keyword { color: var(--red); }
+    .string { color: #a5d6ff; }
+    .comment { color: var(--text-muted); font-style: italic; }
+    .field { color: var(--purple); }
+    .type { color: var(--green); }
+
+    /* Flow diagrams (ASCII-style) */
+    .diagram {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+      font-family: 'SF Mono', monospace;
+      font-size: 0.8rem;
+      line-height: 1.8;
+      white-space: pre;
+      overflow-x: auto;
+      color: var(--text-muted);
+    }
+    .diagram .highlight { color: var(--accent); font-weight: bold; }
+    .diagram .red { color: var(--red); }
+    .diagram .green { color: var(--green); }
+    .diagram .orange { color: var(--orange); }
+
+    /* Progress bars */
+    .bar-container {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin: 0.5rem 0;
+    }
+    .bar-label { width: 180px; font-size: 0.85rem; color: var(--text-muted); }
+    .bar {
+      flex: 1;
+      height: 24px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s;
+    }
+    .bar-value {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    /* Phase timeline */
+    .timeline {
+      display: flex;
+      gap: 0;
+      margin: 1.5rem 0;
+    }
+    .phase {
+      flex: 1;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      text-align: center;
+      position: relative;
+    }
+    .phase:first-child { border-radius: 8px 0 0 8px; }
+    .phase:last-child { border-radius: 0 8px 8px 0; }
+    .phase.done { background: rgba(63, 185, 80, 0.1); border-color: var(--green); }
+    .phase.current { background: rgba(88, 166, 255, 0.1); border-color: var(--accent); }
+    .phase.upcoming { background: rgba(139, 148, 158, 0.05); }
+    .phase-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .phase-title { font-size: 0.95rem; font-weight: 600; margin-top: 0.25rem; }
+    .phase.done .phase-title { color: var(--green); }
+    .phase.current .phase-title { color: var(--accent); }
+    .phase.upcoming .phase-title { color: var(--text-muted); }
+
+    /* Lists */
+    ul, ol { margin: 0.5rem 0 1rem 1.5rem; color: var(--text-muted); }
+    li { margin-bottom: 0.4rem; }
+    li code { background: rgba(88, 166, 255, 0.1); padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.85rem; }
+
+    /* Inline highlights */
+    .tag {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 3px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .tag-red { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+    .tag-green { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+    .tag-blue { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+    .tag-orange { background: rgba(210, 153, 34, 0.15); color: var(--orange); }
+
+    .toc { margin: 1rem 0 2rem; }
+    .toc a { color: var(--accent); text-decoration: none; }
+    .toc a:hover { text-decoration: underline; }
+    .toc li { margin-bottom: 0.3rem; }
+
+    hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+  </style>
+</head>
+<body>
+
+  <h1>GitHub API Rate Limit Optimization <span class="status">Design Doc</span></h1>
+  <div class="meta">
+    <strong>Project:</strong> <span>Agent Orchestrator</span> &nbsp;|&nbsp;
+    <strong>Author:</strong> AO &nbsp;|&nbsp;
+    <strong>Date:</strong> March 23, 2026 &nbsp;|&nbsp;
+    <strong>Issue:</strong> <span>#608</span>
+  </div>
+
+  <nav class="toc">
+    <strong>Contents</strong>
+    <ol>
+      <li><a href="#problem">Problem Statement</a></li>
+      <li><a href="#architecture">System Architecture — Where API Calls Happen</a></li>
+      <li><a href="#current">Current API Usage Breakdown</a></li>
+      <li><a href="#phase1">Phase 1: Request Deduplication &amp; Batching (PR #617)</a></li>
+      <li><a href="#phase2">Phase 2: Batched GraphQL Queries (Proposed)</a></li>
+      <li><a href="#phase3">Phase 3: Webhook-Driven Updates (Future)</a></li>
+      <li><a href="#comparison">Comparison &amp; Projected Impact</a></li>
+      <li><a href="#implementation">Implementation Plan</a></li>
+    </ol>
+  </nav>
+
+  <hr>
+
+  <!-- ===== PROBLEM ===== -->
+  <h2 id="problem">1. Problem Statement</h2>
+
+  <div class="card problem">
+    <h3>⚠️ The Problem</h3>
+    <p>
+      Agent Orchestrator exhausts GitHub's <strong>5,000 requests/hour</strong> API limit during heavy parallel usage.
+      With 10+ agent sessions running concurrently, the orchestrator's polling loop consumes 2,000–4,000 API calls/hour
+      — leaving little headroom and frequently hitting rate limits, which kills all sessions.
+    </p>
+  </div>
+
+  <h3>What Happened (March 22, 2026)</h3>
+  <ul>
+    <li>12 agent sessions spawned on issue #13, all sharing the same branch/PR</li>
+    <li>Each session + orchestrator polling burned through API quota</li>
+    <li>Rate limit hit → GitHub returned 403s → orchestrator starved → all sessions killed</li>
+    <li>Result: <span class="tag tag-red">25 dead sessions</span>, zero shipped PRs</li>
+  </ul>
+
+  <h3>GitHub Rate Limits</h3>
+  <table>
+    <tr><th>API</th><th>Limit</th><th>Window</th><th>Notes</th></tr>
+    <tr><td>REST API (core)</td><td class="num">5,000</td><td>per hour</td><td>Used by <code>gh pr view</code>, <code>gh issue list</code></td></tr>
+    <tr><td>GraphQL API</td><td class="num">5,000</td><td>per hour</td><td>Point-based complexity limit (~500k points)</td></tr>
+    <tr><td>Search API</td><td class="num">30</td><td>per minute</td><td>Rarely used by AO</td></tr>
+  </table>
+
+  <hr>
+
+  <!-- ===== ARCHITECTURE ===== -->
+  <h2 id="architecture">2. System Architecture — Where API Calls Happen</h2>
+
+  <div class="diagram"><span class="highlight">┌─────────────────────────────────────────────────────────┐</span>
+<span class="highlight">│                    ORCHESTRATOR                          │</span>
+<span class="highlight">│  (single process — polls ALL sessions periodically)      │</span>
+<span class="highlight">└────────────────────┬────────────────────────────────────┘</span>
+                     │
+          <span class="orange">Polling loop (every 30s)</span>
+          <span class="orange">For EACH active session:</span>
+                     │
+       ┌─────────────┼─────────────┬─────────────┐
+       ▼             ▼             ▼             ▼
+  <span class="red">┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐</span>
+  <span class="red">│ Agent 1 │ │ Agent 2 │ │ Agent 3 │ │ Agent N │</span>
+  <span class="red">│  PR #18 │ │  PR #19 │ │  PR #20 │ │  PR #N  │</span>
+  <span class="red">└─────────┘ └─────────┘ └─────────┘ └─────────┘</span>
+
+  <span class="comment">Each arrow = multiple GitHub API calls:</span>
+  <span class="red">  • gh pr view (summary)      ─── 1 call</span>
+  <span class="red">  • gh pr view (reviews)      ─── 1 call</span>
+  <span class="red">  • gh pr view (review decision) ─ 1 call</span>
+  <span class="red">  • gh pr view (mergeable)    ─── 1 call</span>
+  <span class="red">  • gh pr checks (CI status)  ─── 1 call</span>
+  <span class="red">  • gh pr view (threads)      ─── 1 call</span>
+  <span class="comment">  ──────────────────────────────────────</span>
+  <span class="red">  Total: ~6 calls per PR per poll cycle</span></div>
+
+  <div class="card info">
+    <h3>Key Insight</h3>
+    <p>
+      The <strong>orchestrator</strong> is the bottleneck, not individual agents. It polls GitHub for
+      <em>every</em> active session's PR status in a loop. N sessions × 6 calls × polls/hour = rate limit explosion.
+      Individual agents also make calls (creating PRs, pushing, checking CI), but the orchestrator's
+      continuous polling is the dominant consumer.
+    </p>
+  </div>
+
+  <hr>
+
+  <!-- ===== CURRENT USAGE ===== -->
+  <h2 id="current">3. Current API Usage Breakdown</h2>
+
+  <h3>Per-PR API Calls (Before Any Optimization)</h3>
+  <table>
+    <tr><th>Operation</th><th>Method</th><th>Calls</th><th>Caller</th></tr>
+    <tr><td>PR Summary (title, state, body)</td><td><code>gh pr view --json</code></td><td class="num">1</td><td>Orchestrator</td></tr>
+    <tr><td>Review Decision</td><td><code>gh pr view --json reviewDecision</code></td><td class="num">1</td><td>Orchestrator</td></tr>
+    <tr><td>Reviews List</td><td><code>gh pr view --json reviews</code></td><td class="num">1</td><td>Orchestrator</td></tr>
+    <tr><td>Mergeability</td><td><code>gh pr view --json mergeable</code></td><td class="num">1</td><td>Orchestrator</td></tr>
+    <tr><td>CI Check Status</td><td><code>gh pr checks</code></td><td class="num">1</td><td>Orchestrator</td></tr>
+    <tr><td>CI Summary (duplicate)</td><td><code>gh pr checks</code> (again)</td><td class="num">1</td><td>Web layer</td></tr>
+    <tr><th colspan="2">Total per PR per poll cycle</th><th class="num bad">~6</th><th></th></tr>
+  </table>
+
+  <h3>Projected Hourly Usage by Session Count</h3>
+  <p>Assuming orchestrator polls every 30 seconds = 120 cycles/hour:</p>
+
+  <div class="bar-container">
+    <span class="bar-label">5 sessions</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 72%; background: var(--orange);"></div>
+      <span class="bar-value">3,600/hr (72%)</span>
+    </div>
+  </div>
+  <div class="bar-container">
+    <span class="bar-label">8 sessions</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 100%; background: var(--red);"></div>
+      <span class="bar-value">5,760/hr (115%) 💥</span>
+    </div>
+  </div>
+  <div class="bar-container">
+    <span class="bar-label">10 sessions</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 100%; background: var(--red);"></div>
+      <span class="bar-value">7,200/hr (144%) 💥</span>
+    </div>
+  </div>
+  <div class="bar-container">
+    <span class="bar-label">15 sessions</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 100%; background: var(--red);"></div>
+      <span class="bar-value">10,800/hr (216%) 💥</span>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- ===== PHASE 1 ===== -->
+  <h2 id="phase1">4. Phase 1: Request Deduplication &amp; Batching <span class="tag tag-green">Merged</span></h2>
+  <p><strong>PR:</strong> <a href="https://github.com/ComposioHQ/agent-orchestrator/pull/617" style="color: var(--accent);">#617</a> — <em>fix: reduce GitHub API calls via deduplication and batching</em></p>
+
+  <div class="card solution">
+    <h3>What It Does</h3>
+    <ul>
+      <li><strong>Request Deduplication:</strong> When multiple callers request the same data simultaneously, they share one API call via <code>RequestDeduplicator</code></li>
+      <li><strong>Field Batching:</strong> Combines multiple <code>gh pr view</code> calls (summary, reviews, reviewDecision, mergeable) into a single call via <code>getPRViewData()</code></li>
+      <li><strong>Duplicate Call Fix:</strong> <code>getCISummary()</code> now accepts pre-fetched checks instead of re-fetching</li>
+    </ul>
+  </div>
+
+  <h3>How Deduplication Works</h3>
+  <div class="diagram"><span class="comment">// BEFORE: 5 agents poll same PR simultaneously</span>
+<span class="red">Agent 1 ──→ gh pr view #18 ──→ GitHub API  (call 1)</span>
+<span class="red">Agent 2 ──→ gh pr view #18 ──→ GitHub API  (call 2)</span>
+<span class="red">Agent 3 ──→ gh pr view #18 ──→ GitHub API  (call 3)</span>
+<span class="red">Agent 4 ──→ gh pr view #18 ──→ GitHub API  (call 4)</span>
+<span class="red">Agent 5 ──→ gh pr view #18 ──→ GitHub API  (call 5)</span>
+
+<span class="comment">// AFTER: RequestDeduplicator collapses identical concurrent requests</span>
+<span class="green">Agent 1 ──→ dedupeGh("pr view #18") ──→ GitHub API  (1 call)</span>
+<span class="green">Agent 2 ──→ dedupeGh("pr view #18") ──┘ (shares result)</span>
+<span class="green">Agent 3 ──→ dedupeGh("pr view #18") ──┘ (shares result)</span>
+<span class="green">Agent 4 ──→ dedupeGh("pr view #18") ──┘ (shares result)</span>
+<span class="green">Agent 5 ──→ dedupeGh("pr view #18") ──┘ (shares result)</span></div>
+
+  <h3>How Field Batching Works</h3>
+  <div class="diagram"><span class="comment">// BEFORE: Separate calls for each field set</span>
+<span class="red">getPRSummary()     → gh pr view --json title,state,body        (call 1)</span>
+<span class="red">getReviewDecision()→ gh pr view --json reviewDecision          (call 2)</span>
+<span class="red">getReviews()       → gh pr view --json reviews                 (call 3)</span>
+<span class="red">getMergeability()  → gh pr view --json mergeable               (call 4)</span>
+<span class="red">getCIChecks()      → gh pr checks                             (call 5)</span>
+<span class="red">getCISummary()     → gh pr checks  (duplicate!)               (call 6)</span>
+
+<span class="comment">// AFTER: One batched call + shared CI data</span>
+<span class="green">getPRViewData()    → gh pr view --json title,state,body,</span>
+<span class="green">                     reviewDecision,reviews,mergeable           (call 1)</span>
+<span class="green">getCIChecks()      → gh pr checks                             (call 2)</span>
+<span class="green">getCISummary(checks) → reuses checks from above               (call 0)</span></div>
+
+  <h3>Impact</h3>
+  <table>
+    <tr><th>Metric</th><th>Before</th><th>After Phase 1</th><th>Improvement</th></tr>
+    <tr><td>Calls per PR (unique PRs)</td><td class="num bad">~6</td><td class="num good">~3</td><td class="good">50% reduction</td></tr>
+    <tr><td>Concurrent identical requests</td><td class="num bad">N calls</td><td class="num good">1 call</td><td class="good">~90% reduction</td></tr>
+    <tr><td>10 sessions hourly usage</td><td class="num bad">7,200</td><td class="num warn">3,600</td><td class="good">50% reduction</td></tr>
+    <tr><td>Max parallel sessions (safe)</td><td class="num bad">~7</td><td class="num warn">~13</td><td class="good">~2× capacity</td></tr>
+  </table>
+
+  <div class="card warning">
+    <h3>Limitation</h3>
+    <p>
+      Phase 1 halves the calls per PR, but each PR is still polled independently. With 10+ sessions
+      on different PRs, we still approach the rate limit. Deduplication primarily helps the edge case
+      of multiple sessions sharing the same PR (retry storms).
+    </p>
+  </div>
+
+  <hr>
+
+  <!-- ===== PHASE 2 ===== -->
+  <h2 id="phase2">5. Phase 2: Batched GraphQL Queries <span class="tag tag-blue">Proposed</span></h2>
+
+  <div class="card solution">
+    <h3>Core Idea</h3>
+    <p>
+      Instead of making separate REST/CLI calls for each PR, combine <strong>all active PRs into a single
+      GraphQL query</strong> using field aliases. One request returns data for every PR the orchestrator is tracking.
+    </p>
+  </div>
+
+  <h3>Architecture Change</h3>
+  <div class="diagram"><span class="comment">// BEFORE: N separate requests (1 per PR)</span>
+<span class="red">Orchestrator ──→ gh pr view #18 ──→ GitHub REST   (call 1)</span>
+<span class="red">             ──→ gh pr checks #18 ─→ GitHub REST   (call 2)</span>
+<span class="red">             ──→ gh pr view #19 ──→ GitHub REST   (call 3)</span>
+<span class="red">             ──→ gh pr checks #19 ─→ GitHub REST   (call 4)</span>
+<span class="red">             ──→ gh pr view #20 ──→ GitHub REST   (call 5)</span>
+<span class="red">             ──→ gh pr checks #20 ─→ GitHub REST   (call 6)</span>
+<span class="red">             ... × N PRs × 2-3 calls each</span>
+
+<span class="comment">// AFTER: 1 GraphQL query for ALL PRs</span>
+<span class="green">Orchestrator ──→ GraphQL batch query ──→ GitHub GraphQL  (1 call)</span>
+<span class="green">                  ├── PR #18: title, state, CI, reviews, mergeable</span>
+<span class="green">                  ├── PR #19: title, state, CI, reviews, mergeable</span>
+<span class="green">                  ├── PR #20: title, state, CI, reviews, mergeable</span>
+<span class="green">                  └── PR #N:  title, state, CI, reviews, mergeable</span></div>
+
+  <h3>GraphQL Query Structure</h3>
+  <pre><code><span class="keyword">query</span> <span class="type">BatchPRStatus</span> {
+  <span class="field">pr18</span>: <span class="type">repository</span>(<span class="field">owner</span>: <span class="string">"ComposioHQ"</span>, <span class="field">name</span>: <span class="string">"agent-orchestrator"</span>) {
+    <span class="type">pullRequest</span>(<span class="field">number</span>: 18) {
+      <span class="field">title</span>
+      <span class="field">state</span>
+      <span class="field">mergeable</span>
+      <span class="field">reviewDecision</span>
+      <span class="field">reviews</span>(<span class="field">last</span>: 10) {
+        <span class="field">nodes</span> { <span class="field">author</span> { <span class="field">login</span> } <span class="field">state</span> <span class="field">body</span> }
+      }
+      <span class="field">commits</span>(<span class="field">last</span>: 1) {
+        <span class="field">nodes</span> {
+          <span class="field">commit</span> {
+            <span class="field">statusCheckRollup</span> {
+              <span class="field">state</span>
+              <span class="field">contexts</span>(<span class="field">first</span>: 20) {
+                <span class="field">nodes</span> {
+                  ... <span class="keyword">on</span> <span class="type">CheckRun</span> {
+                    <span class="field">name</span> <span class="field">conclusion</span> <span class="field">status</span>
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      <span class="field">reviewThreads</span>(<span class="field">first</span>: 20) {
+        <span class="field">nodes</span> { <span class="field">isResolved</span> <span class="field">comments</span>(<span class="field">first</span>: 5) { <span class="field">nodes</span> { <span class="field">body</span> <span class="field">author</span> { <span class="field">login</span> } } } }
+      }
+    }
+  }
+  <span class="field">pr19</span>: <span class="type">repository</span>(<span class="field">owner</span>: <span class="string">"ComposioHQ"</span>, <span class="field">name</span>: <span class="string">"agent-orchestrator"</span>) {
+    <span class="type">pullRequest</span>(<span class="field">number</span>: 19) {
+      <span class="comment">... same fields</span>
+    }
+  }
+  <span class="comment">// ... one alias per active PR</span>
+}</code></pre>
+
+  <h3>Implementation: <code>batchFetchPRStatuses()</code></h3>
+  <pre><code><span class="keyword">async function</span> <span class="type">batchFetchPRStatuses</span>(
+  prs: { owner: <span class="type">string</span>; repo: <span class="type">string</span>; number: <span class="type">number</span> }[]
+): <span class="type">Promise</span>&lt;<span class="type">Map</span>&lt;<span class="type">number</span>, <span class="type">PRStatus</span>&gt;&gt; {
+
+  <span class="comment">// Build aliased GraphQL query</span>
+  <span class="keyword">const</span> fragments = prs.map(pr =&gt;
+    `pr${pr.number}: repository(owner: "${pr.owner}", name: "${pr.repo}") {
+      pullRequest(number: ${pr.number}) {
+        title state mergeable reviewDecision
+        reviews(last: 10) { nodes { author { login } state body } }
+        commits(last: 1) { nodes { commit { statusCheckRollup {
+          state contexts(first: 20) { nodes { ... on CheckRun { name conclusion status } } }
+        } } } }
+        reviewThreads(first: 20) { nodes { isResolved } }
+      }
+    }`
+  );
+
+  <span class="keyword">const</span> query = `query BatchPRStatus { ${fragments.join(<span class="string">"\n"</span>)} }`;
+
+  <span class="comment">// Single API call for ALL PRs</span>
+  <span class="keyword">const</span> result = <span class="keyword">await</span> gh(<span class="string">`api graphql -f query='${query}'`</span>);
+
+  <span class="comment">// Parse and return mapped results</span>
+  <span class="keyword">return</span> parseBatchResponse(result, prs);
+}</code></pre>
+
+  <h3>Impact</h3>
+  <table>
+    <tr><th>Metric</th><th>Phase 1 (Current)</th><th>Phase 2 (Proposed)</th><th>Improvement</th></tr>
+    <tr><td>API calls per poll cycle (10 PRs)</td><td class="num warn">~30</td><td class="num good">1</td><td class="good">97% reduction</td></tr>
+    <tr><td>10 sessions hourly usage</td><td class="num warn">3,600</td><td class="num good">~120</td><td class="good">97% reduction</td></tr>
+    <tr><td>Max parallel sessions (safe)</td><td class="num warn">~13</td><td class="num good">~200+</td><td class="good">15× capacity</td></tr>
+    <tr><td>Calls scale with session count?</td><td class="bad">Yes (linear)</td><td class="good">No (constant)</td><td class="good">O(1) polling</td></tr>
+  </table>
+
+  <div class="bar-container">
+    <span class="bar-label">10 sessions (Phase 1)</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 72%; background: var(--orange);"></div>
+      <span class="bar-value">3,600/hr</span>
+    </div>
+  </div>
+  <div class="bar-container">
+    <span class="bar-label">10 sessions (Phase 2)</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 2.4%; background: var(--green);"></div>
+      <span class="bar-value">120/hr ✨</span>
+    </div>
+  </div>
+  <div class="bar-container">
+    <span class="bar-label">50 sessions (Phase 2)</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 2.4%; background: var(--green);"></div>
+      <span class="bar-value">120/hr ✨</span>
+    </div>
+  </div>
+
+  <div class="card info">
+    <h3>GraphQL Complexity Budget</h3>
+    <p>
+      GitHub GraphQL has a ~500,000 point complexity limit per query. Each PR with full status checks costs
+      approximately 50–150 points. This means we can safely batch <strong>50+ PRs</strong> in a single query.
+      For extreme scale (100+ PRs), we'd split into 2–3 queries — still vastly better than 100+ individual calls.
+    </p>
+  </div>
+
+  <hr>
+
+  <!-- ===== PHASE 3 ===== -->
+  <h2 id="phase3">6. Phase 3: Webhook-Driven Updates <span class="tag tag-orange">Future</span></h2>
+
+  <div class="card solution">
+    <h3>The Ultimate Solution: Stop Polling</h3>
+    <p>
+      Instead of polling GitHub every 30 seconds, register webhooks so GitHub <em>pushes</em> updates to us.
+      Zero polling = zero wasted API calls. The orchestrator only makes API calls when it needs to
+      take action (merge, comment, etc.).
+    </p>
+  </div>
+
+  <div class="diagram"><span class="comment">// CURRENT: Orchestrator polls GitHub continuously</span>
+<span class="red">Orchestrator ──(every 30s)──→ GitHub: "Any changes?"</span>
+<span class="red">GitHub: "No."</span>
+<span class="red">Orchestrator ──(every 30s)──→ GitHub: "Any changes?"</span>
+<span class="red">GitHub: "No."</span>
+<span class="red">Orchestrator ──(every 30s)──→ GitHub: "Yes! CI passed."</span>
+<span class="red">                               (wasted 100+ calls to find this out)</span>
+
+<span class="comment">// WEBHOOK: GitHub tells us immediately</span>
+<span class="green">GitHub ──(CI completed)──→ Orchestrator webhook endpoint</span>
+<span class="green">Orchestrator: "Got it. Updating session ao-42."</span>
+<span class="green">                               (0 polling calls, instant reaction)</span></div>
+
+  <h3>Webhook Events Needed</h3>
+  <table>
+    <tr><th>Event</th><th>Replaces</th><th>Use Case</th></tr>
+    <tr><td><code>check_run</code> / <code>check_suite</code></td><td>CI status polling</td><td>Know instantly when CI passes/fails</td></tr>
+    <tr><td><code>pull_request_review</code></td><td>Review polling</td><td>Route review comments to agents</td></tr>
+    <tr><td><code>pull_request</code></td><td>PR state polling</td><td>Detect merges, closes, updates</td></tr>
+    <tr><td><code>issue_comment</code></td><td>Comment polling</td><td>React to PR comments</td></tr>
+  </table>
+
+  <div class="card warning">
+    <h3>Complexity Trade-off</h3>
+    <p>
+      Webhooks require a publicly accessible endpoint (or a tunnel), webhook secret management,
+      and handling delivery failures. This is the most effective solution but also the most complex
+      to implement. Best suited as a Phase 3 optimization after Phase 2 proves the batching approach.
+    </p>
+  </div>
+
+  <hr>
+
+  <!-- ===== COMPARISON ===== -->
+  <h2 id="comparison">7. Comparison &amp; Projected Impact</h2>
+
+  <table>
+    <tr>
+      <th>Scenario</th>
+      <th>Baseline<br><small>(No optimization)</small></th>
+      <th>Phase 1<br><small>(Dedup + Batch)</small></th>
+      <th>Phase 2<br><small>(GraphQL Batch)</small></th>
+      <th>Phase 3<br><small>(Webhooks)</small></th>
+    </tr>
+    <tr>
+      <td>API calls/cycle (10 PRs)</td>
+      <td class="num bad">~60</td>
+      <td class="num warn">~30</td>
+      <td class="num good">1</td>
+      <td class="num good">0</td>
+    </tr>
+    <tr>
+      <td>Hourly usage (10 sessions)</td>
+      <td class="num bad">7,200</td>
+      <td class="num warn">3,600</td>
+      <td class="num good">120</td>
+      <td class="num good">~10*</td>
+    </tr>
+    <tr>
+      <td>Hourly usage (25 sessions)</td>
+      <td class="num bad">18,000</td>
+      <td class="num bad">9,000</td>
+      <td class="num good">120</td>
+      <td class="num good">~25*</td>
+    </tr>
+    <tr>
+      <td>Max safe sessions</td>
+      <td class="num bad">~7</td>
+      <td class="num warn">~13</td>
+      <td class="num good">200+</td>
+      <td class="num good">unlimited**</td>
+    </tr>
+    <tr>
+      <td>Scales with session count?</td>
+      <td class="bad">O(N)</td>
+      <td class="bad">O(N)</td>
+      <td class="good">O(1)</td>
+      <td class="good">O(0)</td>
+    </tr>
+    <tr>
+      <td>Latency to detect changes</td>
+      <td>30s avg</td>
+      <td>30s avg</td>
+      <td>30s avg</td>
+      <td class="good">&lt;5s</td>
+    </tr>
+    <tr>
+      <td>Implementation complexity</td>
+      <td>—</td>
+      <td class="good">Low</td>
+      <td class="warn">Medium</td>
+      <td class="bad">High</td>
+    </tr>
+  </table>
+  <p><small>* Webhooks still need occasional API calls for actions (merge, comment). ** Limited by compute, not API quota.</small></p>
+
+  <h3>Visual: Hourly API Usage at 10 Sessions</h3>
+  <div class="bar-container">
+    <span class="bar-label">Baseline</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 100%; background: var(--red);"></div>
+      <span class="bar-value">7,200/hr 💥</span>
+    </div>
+  </div>
+  <div class="bar-container">
+    <span class="bar-label">Phase 1 (current)</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 72%; background: var(--orange);"></div>
+      <span class="bar-value">3,600/hr</span>
+    </div>
+  </div>
+  <div class="bar-container">
+    <span class="bar-label">Phase 2 (proposed)</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 2.4%; background: var(--green);"></div>
+      <span class="bar-value">120/hr ✨</span>
+    </div>
+  </div>
+  <div class="bar-container">
+    <span class="bar-label">Phase 3 (future)</span>
+    <div class="bar">
+      <div class="bar-fill" style="width: 0.5%; background: var(--accent);"></div>
+      <span class="bar-value">~10/hr 🚀</span>
+    </div>
+  </div>
+
+  <hr>
+
+  <!-- ===== IMPLEMENTATION ===== -->
+  <h2 id="implementation">8. Implementation Plan</h2>
+
+  <div class="timeline">
+    <div class="phase done">
+      <div class="phase-label">Phase 1</div>
+      <div class="phase-title">✅ Dedup + Batch</div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">PR #617 merged<br>~50% reduction</p>
+    </div>
+    <div class="phase current">
+      <div class="phase-label">Phase 2</div>
+      <div class="phase-title">🔵 GraphQL Batch</div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Proposed<br>~97% reduction</p>
+    </div>
+    <div class="phase upcoming">
+      <div class="phase-label">Phase 3</div>
+      <div class="phase-title">⬚ Webhooks</div>
+      <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">Future<br>Zero polling</p>
+    </div>
+  </div>
+
+  <h3>Phase 2 Implementation Steps</h3>
+  <div class="card info">
+    <ol>
+      <li><strong>Create <code>packages/plugins/scm-github/src/batch-graphql.ts</code></strong>
+        <ul>
+          <li><code>batchFetchPRStatuses(prs[])</code> — builds aliased GraphQL query, executes, parses</li>
+          <li>Handles complexity limits by chunking (50 PRs per query)</li>
+          <li>Falls back to individual REST calls on GraphQL failure</li>
+        </ul>
+      </li>
+      <li><strong>Update orchestrator polling loop</strong>
+        <ul>
+          <li>Collect all active session PR numbers</li>
+          <li>Call <code>batchFetchPRStatuses()</code> once</li>
+          <li>Distribute results to each session's status</li>
+        </ul>
+      </li>
+      <li><strong>Update SCM interface in <code>packages/core/src/types.ts</code></strong>
+        <ul>
+          <li>Add <code>batchGetPRStatuses(prs[])</code> to SCM plugin interface</li>
+          <li>GitLab plugin gets equivalent implementation using their GraphQL API</li>
+        </ul>
+      </li>
+      <li><strong>Tests</strong>
+        <ul>
+          <li>Unit tests for query building and response parsing</li>
+          <li>Integration test with mock GraphQL responses</li>
+          <li>Complexity limit chunking tests</li>
+        </ul>
+      </li>
+    </ol>
+  </div>
+
+  <h3>Files to Change</h3>
+  <table>
+    <tr><th>File</th><th>Change</th></tr>
+    <tr><td><code>packages/plugins/scm-github/src/batch-graphql.ts</code></td><td><span class="tag tag-green">NEW</span> Batched GraphQL query builder + executor</td></tr>
+    <tr><td><code>packages/plugins/scm-github/src/index.ts</code></td><td>Add <code>batchGetPRStatuses()</code> method</td></tr>
+    <tr><td><code>packages/core/src/types.ts</code></td><td>Add batch method to SCM interface</td></tr>
+    <tr><td><code>packages/core/src/session-manager.ts</code></td><td>Use batch fetch in polling loop</td></tr>
+    <tr><td><code>packages/plugins/scm-gitlab/src/index.ts</code></td><td>Stub/implement GitLab equivalent</td></tr>
+    <tr><td><code>packages/web/src/lib/serialize.ts</code></td><td>Use batch data in web layer</td></tr>
+  </table>
+
+  <hr>
+
+  <div class="card info" style="margin-top: 2rem;">
+    <h3>Summary</h3>
+    <p>
+      The rate limit problem is fundamentally a <strong>polling fan-out</strong> issue. Phase 1 reduces calls per PR.
+      Phase 2 eliminates the fan-out entirely by batching all PRs into one query.
+      Phase 3 eliminates polling altogether. Each phase is independently valuable and incrementally deployable.
+    </p>
+    <p style="margin-bottom: 0;">
+      <strong>Recommended next step:</strong> Implement Phase 2 (batched GraphQL) — it delivers the biggest
+      bang for the buck with moderate implementation effort, taking us from ~3,600 calls/hour to ~120 calls/hour
+      at 10 sessions.
+    </p>
+  </div>
+
+</body>
+</html></code></pre>
+</body>
+</html>

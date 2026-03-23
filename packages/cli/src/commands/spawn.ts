@@ -167,6 +167,7 @@ export function registerSpawn(program: Command): void {
     .option("--assign-on-github", "Assign the claimed PR to the authenticated GitHub user")
     .option("--decompose", "Decompose issue into subtasks before spawning")
     .option("--max-depth <n>", "Max decomposition depth (default: 3)")
+    .option("--dry-run", "Show what would be spawned without creating a session")
     .action(
       async (
         first: string | undefined,
@@ -178,6 +179,7 @@ export function registerSpawn(program: Command): void {
           assignOnGithub?: boolean;
           decompose?: boolean;
           maxDepth?: string;
+          dryRun?: boolean;
         },
       ) => {
         // Catch old two-arg usage: ao spawn <project> <issue>
@@ -224,6 +226,24 @@ export function registerSpawn(program: Command): void {
           claimPr: opts.claimPr,
           assignOnGithub: opts.assignOnGithub,
         };
+
+        if (opts.dryRun) {
+          const project = config.projects[projectId];
+          const runtime = project?.runtime ?? config.defaults.runtime;
+          const agent = opts.agent ?? project?.agent ?? config.defaults.agent;
+          const workspace = project?.workspace ?? config.defaults.workspace;
+
+          console.log(chalk.bold("Dry run — no session will be created\n"));
+          console.log(`  Project:   ${chalk.cyan(projectId)}`);
+          if (issueId) console.log(`  Issue:     ${chalk.cyan(issueId)}`);
+          console.log(`  Agent:     ${chalk.cyan(String(agent ?? "default"))}`);
+          console.log(`  Runtime:   ${chalk.cyan(String(runtime ?? "default"))}`);
+          console.log(`  Workspace: ${chalk.cyan(String(workspace ?? "default"))}`);
+          if (opts.claimPr) console.log(`  Claim PR:  ${chalk.cyan(opts.claimPr)}`);
+          if (opts.decompose) console.log(`  Decompose: ${chalk.cyan("yes")}`);
+          console.log();
+          return;
+        }
 
         try {
           await runSpawnPreflight(config, projectId, claimOptions);
