@@ -165,7 +165,7 @@ function printTableHeader(): void {
   console.log(chalk.dim(`  ${"─".repeat(totalWidth)}`));
 }
 
-function printSessionRow(info: SessionInfo): void {
+function printSessionRow(info: SessionInfo, verbose = false): void {
   const prStr = info.prNumber ? `#${info.prNumber}` : "-";
 
   const row =
@@ -188,11 +188,28 @@ function printSessionRow(info: SessionInfo): void {
   // Show summary on a second line if available
   const displaySummary = info.claudeSummary || info.summary;
   if (displaySummary) {
-    console.log(`  ${" ".repeat(COL.session)}${chalk.dim(displaySummary.slice(0, 60))}`);
+    const summaryText = verbose ? displaySummary : displaySummary.slice(0, 60);
+    console.log(`  ${" ".repeat(COL.session)}${chalk.dim(summaryText)}`);
+  }
+
+  if (verbose) {
+    const indent = " ".repeat(COL.session + 2);
+    if (info.pr) {
+      console.log(`${indent}${chalk.dim("PR:")} ${chalk.blue(info.pr)}`);
+    }
+    if (info.issue) {
+      console.log(`${indent}${chalk.dim("Issue:")} ${chalk.yellow(info.issue)}`);
+    }
+    if (info.ciStatus) {
+      console.log(`${indent}${chalk.dim("CI:")} ${info.ciStatus}`);
+    }
+    if (info.reviewDecision) {
+      console.log(`${indent}${chalk.dim("Review:")} ${info.reviewDecision}`);
+    }
   }
 }
 
-function printOrchestratorRow(info: SessionInfo): void {
+function printOrchestratorRow(info: SessionInfo, verbose = false): void {
   const lastActivity =
     info.lastActivity === "-" ? chalk.dim("unknown") : chalk.dim(info.lastActivity);
   console.log(
@@ -200,7 +217,8 @@ function printOrchestratorRow(info: SessionInfo): void {
   );
   const displaySummary = info.claudeSummary || info.summary;
   if (displaySummary) {
-    console.log(`                ${chalk.dim(displaySummary.slice(0, 60))}`);
+    const summaryText = verbose ? displaySummary : displaySummary.slice(0, 60);
+    console.log(`                ${chalk.dim(summaryText)}`);
   }
 }
 
@@ -209,8 +227,9 @@ export function registerStatus(program: Command): void {
     .command("status")
     .description("Show all sessions with branch, activity, PR, and CI status")
     .option("-p, --project <id>", "Filter by project ID")
+    .option("-v, --verbose", "Show extended details for each session")
     .option("--json", "Output as JSON")
-    .action(async (opts: { project?: string; json?: boolean }) => {
+    .action(async (opts: { project?: string; json?: boolean; verbose?: boolean }) => {
       let config: ReturnType<typeof loadConfig>;
       try {
         config = loadConfig();
@@ -296,7 +315,7 @@ export function registerStatus(program: Command): void {
 
         if (orchestrators.length > 0) {
           for (const info of orchestrators) {
-            printOrchestratorRow(info);
+            printOrchestratorRow(info, opts.verbose);
           }
         }
 
@@ -308,7 +327,7 @@ export function registerStatus(program: Command): void {
 
         printTableHeader();
         for (const info of workers) {
-          printSessionRow(info);
+          printSessionRow(info, opts.verbose);
         }
         console.log();
       }
