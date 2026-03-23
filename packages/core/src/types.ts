@@ -571,8 +571,13 @@ export interface SCM {
   /** Get individual CI check statuses */
   getCIChecks(pr: PRInfo): Promise<CICheck[]>;
 
-  /** Get overall CI summary */
-  getCISummary(pr: PRInfo): Promise<CIStatus>;
+  /**
+   * Get overall CI summary.
+   *
+   * @param pr - PR to check
+   * @param checks - Optional pre-fetched checks to avoid duplicate API call
+   */
+  getCISummary(pr: PRInfo, checks?: CICheck[]): Promise<CIStatus>;
 
   // --- Review Tracking ---
 
@@ -1113,12 +1118,18 @@ export interface PluginManifest {
 
   /** Version */
   version: string;
+
+  /** Human-readable display name (e.g. "Claude Code") */
+  displayName?: string;
 }
 
 /** What a plugin module must export */
 export interface PluginModule<T = unknown> {
   manifest: PluginManifest;
   create(config?: Record<string, unknown>): T;
+
+  /** Optional: detect whether this plugin's runtime/binary is available on the system. */
+  detect?(): boolean;
 }
 
 // =============================================================================
@@ -1302,5 +1313,13 @@ export class SessionNotFoundError extends Error {
   constructor(public readonly sessionId: string) {
     super(`Session not found: ${sessionId}`);
     this.name = "SessionNotFoundError";
+  }
+}
+
+/** Thrown when no agent-orchestrator.yaml config file can be found. */
+export class ConfigNotFoundError extends Error {
+  constructor(message?: string) {
+    super(message ?? "No agent-orchestrator.yaml found. Run `ao start` to create one.");
+    this.name = "ConfigNotFoundError";
   }
 }
