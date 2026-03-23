@@ -112,6 +112,44 @@ describe("scripts/ao-doctor.sh", () => {
     expect(result.stdout).toContain("Environment looks healthy");
   });
 
+  it("auto-creates missing config directories without --fix and reports FIXED", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "ao-doctor-autofix-"));
+    const fakeRepo = createHealthyRepo(tempRoot);
+    const binDir = join(tempRoot, "bin");
+    mkdirSync(binDir, { recursive: true });
+    createHealthyPath(binDir);
+
+    const configPath = join(tempRoot, "agent-orchestrator.yaml");
+    const dataDir = join(tempRoot, "data");
+    const worktreeDir = join(tempRoot, "worktrees");
+    // intentionally do NOT create dataDir or worktreeDir
+    writeFileSync(
+      configPath,
+      [`dataDir: ${dataDir}`, `worktreeDir: ${worktreeDir}`, "projects: {}"].join("\n"),
+    );
+
+    const result = spawnSync("bash", [scriptPath], {
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH || ""}`,
+        AO_REPO_ROOT: fakeRepo,
+        AO_CONFIG_PATH: configPath,
+      },
+      encoding: "utf8",
+    });
+
+    const dataDirExists = existsSync(dataDir);
+    const worktreeDirExists = existsSync(worktreeDir);
+    rmSync(tempRoot, { recursive: true, force: true });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("FIXED");
+    expect(result.stdout).toContain("metadata directory created");
+    expect(result.stdout).toContain("worktree directory created");
+    expect(dataDirExists).toBe(true);
+    expect(worktreeDirExists).toBe(true);
+  });
+
   it("applies safe fixes for missing launcher, missing dirs, and stale temp files", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "ao-doctor-fix-"));
     const fakeRepo = createHealthyRepo(tempRoot);
@@ -119,6 +157,13 @@ describe("scripts/ao-doctor.sh", () => {
     mkdirSync(binDir, { recursive: true });
     createHealthyPath(binDir);
     rmSync(join(binDir, "ao"), { force: true });
+
+    // Exclude any system PATH directories that contain a real 'ao' binary so that
+    // check_launcher correctly detects it as missing and triggers the npm-link fix.
+    const cleanedSystemPath = (process.env.PATH || "")
+      .split(":")
+      .filter((dir) => !existsSync(join(dir, "ao")))
+      .join(":");
 
     const npmLog = join(tempRoot, "npm.log");
     createFakeBinary(
@@ -149,7 +194,7 @@ describe("scripts/ao-doctor.sh", () => {
     const result = spawnSync("bash", [scriptPath, "--fix"], {
       env: {
         ...process.env,
-        PATH: `${binDir}:${process.env.PATH || ""}`,
+        PATH: `${binDir}:${cleanedSystemPath}`,
         AO_REPO_ROOT: fakeRepo,
         AO_CONFIG_PATH: configPath,
         AO_DOCTOR_TMP_ROOT: tmpRoot,
