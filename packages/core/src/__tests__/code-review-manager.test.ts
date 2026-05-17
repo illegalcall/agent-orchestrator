@@ -9,6 +9,7 @@ import { createCodeReviewStore, type CodeReviewStore } from "../code-review-stor
 import {
   buildCodexCodeReviewArgs,
   executeCodeReviewRun,
+  markOutdatedCodeReviewRunsForSession,
   parseReviewerOutput,
   prepareGitReviewerWorkspace,
   sendCodeReviewFindingsToAgent,
@@ -212,6 +213,39 @@ describe("triggerCodeReviewForSession", () => {
     expect(store.getRun(oldClean.id)?.status).toBe("outdated");
     expect(store.getRun(failed.id)?.status).toBe("failed");
     expect(store.getRun(otherWorker.id)?.status).toBe("needs_triage");
+  });
+
+  it("marks stale review runs outdated when the worker HEAD changes", async () => {
+    const oldWaiting = store.createRun({
+      linkedSessionId: "app-1",
+      reviewerSessionId: "app-rev-1",
+      status: "waiting_update",
+      targetSha: "old-sha",
+    });
+    const currentQueued = store.createRun({
+      linkedSessionId: "app-1",
+      reviewerSessionId: "app-rev-2",
+      status: "queued",
+      targetSha: "new-sha",
+    });
+    const failed = store.createRun({
+      linkedSessionId: "app-1",
+      reviewerSessionId: "app-rev-3",
+      status: "failed",
+      targetSha: "old-sha",
+    });
+
+    const updatedCount = await markOutdatedCodeReviewRunsForSession({
+      store,
+      session: makeSession(),
+      resolveTargetSha: async () => "new-sha",
+      now: new Date("2026-05-10T12:00:00.000Z"),
+    });
+
+    expect(updatedCount).toBe(1);
+    expect(store.getRun(oldWaiting.id)?.status).toBe("outdated");
+    expect(store.getRun(currentQueued.id)?.status).toBe("queued");
+    expect(store.getRun(failed.id)?.status).toBe("failed");
   });
 
   it("rejects missing and orchestrator sessions", async () => {

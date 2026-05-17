@@ -211,6 +211,13 @@ export interface SendCodeReviewFindingsResult {
   message: string;
 }
 
+export interface MarkOutdatedCodeReviewRunsInput {
+  store: CodeReviewStore;
+  session: Session;
+  resolveTargetSha?: (session: Session) => Promise<string | undefined>;
+  now?: Date;
+}
+
 export class CodeReviewRunNotFoundError extends Error {
   constructor(runId: string) {
     super(`Code review run not found: ${runId}`);
@@ -425,15 +432,20 @@ function markSupersededReviewRuns({
   linkedSessionId: string;
   targetSha: string | undefined;
   now: Date;
-}): void {
-  if (!targetSha) return;
+}): number {
+  if (!targetSha) return 0;
+
+  let updatedCount = 0;
 
   for (const run of existingRuns) {
     if (run.linkedSessionId !== linkedSessionId) continue;
     if (!run.targetSha || run.targetSha === targetSha) continue;
     if (!SUPERSEDABLE_RUN_STATUSES.has(run.status)) continue;
     store.updateRun(run.id, { status: "outdated" }, now);
+    updatedCount++;
   }
+
+  return updatedCount;
 }
 
 async function resolveGitHeadSha(session: Session): Promise<string | undefined> {
@@ -489,6 +501,22 @@ async function removeReviewerWorktree(repoPath: string, workspacePath: string): 
     }
     rmSync(workspacePath, { recursive: true, force: true });
   }
+}
+
+export async function markOutdatedCodeReviewRunsForSession({
+  store,
+  session,
+  resolveTargetSha = resolveGitHeadSha,
+  now = new Date(),
+}: MarkOutdatedCodeReviewRunsInput): Promise<number> {
+  const targetSha = await resolveTargetSha(session);
+  return markSupersededReviewRuns({
+    store,
+    existingRuns: store.listRuns({ linkedSessionId: session.id }),
+    linkedSessionId: session.id,
+    targetSha,
+    now,
+  });
 }
 
 export async function prepareGitReviewerWorkspace({

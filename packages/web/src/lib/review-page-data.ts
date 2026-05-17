@@ -6,6 +6,7 @@ import {
   isOrchestratorSession,
   isRestorable,
   isTerminalSession,
+  markOutdatedCodeReviewRunsForSession,
 } from "@aoagents/ao-core";
 import { getServices } from "@/lib/services";
 import {
@@ -136,11 +137,20 @@ export const getReviewPageData = cache(async function getReviewPageData(
       };
     });
 
-    pageData.runs = projectIds.flatMap((projectId) => {
+    const runs: DashboardReviewRun[] = [];
+
+    for (const projectId of projectIds) {
       const project = config.projects[projectId];
-      if (!project) return [];
+      if (!project) continue;
       const store = createCodeReviewStore(projectId);
-      return store.listRunSummaries().map((run) => {
+      const projectWorkers = workerSessions.filter((session) => session.projectId === projectId);
+
+      for (const worker of projectWorkers) {
+        await markOutdatedCodeReviewRunsForSession({ store, session: worker });
+      }
+
+      runs.push(
+        ...store.listRunSummaries().map((run) => {
         const worker = workerSessionsById.get(run.linkedSessionId);
         return {
           ...run,
@@ -158,8 +168,11 @@ export const getReviewPageData = cache(async function getReviewPageData(
           workerRuntimeState: worker?.lifecycle.runtime.state ?? null,
           workerHasRuntime: worker?.runtimeHandle !== null && worker?.runtimeHandle !== undefined,
         };
-      });
-    });
+        }),
+      );
+    }
+
+    pageData.runs = runs;
   } catch (err) {
     pageData.dashboardLoadError = formatReviewLoadError(err);
   }
