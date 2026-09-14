@@ -117,15 +117,7 @@ if [ "$SMOKE_ONLY" = false ]; then
   printf '\nRefreshing ao launcher...\n'
   (
     cd "$REPO_ROOT/packages/cli"
-    if npm link 2>/dev/null; then
-      :
-    elif [ -t 0 ]; then
-      printf '  Permission denied. Retrying with sudo...\n'
-      sudo npm link
-    else
-      printf 'ERROR: Permission denied. Run manually: cd %s/packages/cli && sudo npm link\n' "$REPO_ROOT"
-      exit 1
-    fi
+    run_cmd npm link
   )
 
   ensure_repo_clean "Update modified tracked files. Inspect git status, review the changes, and rerun after restoring a clean checkout if needed."

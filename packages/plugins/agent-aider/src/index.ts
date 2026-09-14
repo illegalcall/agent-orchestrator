@@ -10,7 +10,7 @@ import {
   type RuntimeHandle,
   type Session,
 } from "@composio/ao-core";
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { stat, access } from "node:fs/promises";
 import { join } from "node:path";
@@ -70,7 +70,6 @@ export const manifest = {
   slot: "agent" as const,
   description: "Agent plugin: Aider",
   version: "0.1.0",
-  displayName: "Aider",
 };
 
 // =============================================================================
@@ -223,13 +222,4 @@ export function create(): Agent {
   return createAiderAgent();
 }
 
-export function detect(): boolean {
-  try {
-    execFileSync("aider", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export default { manifest, create, detect } satisfies PluginModule<Agent>;
+export default { manifest, create } satisfies PluginModule<Agent>;

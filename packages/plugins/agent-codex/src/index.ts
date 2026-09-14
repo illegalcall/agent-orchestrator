@@ -13,7 +13,7 @@ import {
   type Session,
   type WorkspaceHooksConfig,
 } from "@composio/ao-core";
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { writeFile, mkdir, readFile, readdir, rename, stat, lstat, open } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -69,7 +69,6 @@ export const manifest = {
   slot: "agent" as const,
   description: "Agent plugin: OpenAI Codex CLI",
   version: "0.1.1",
-  displayName: "OpenAI Codex",
 };
 
 // =============================================================================
@@ -874,13 +873,4 @@ export type {
   ApprovalDecision,
 } from "./app-server-client.js";
 
-export function detect(): boolean {
-  try {
-    execFileSync("codex", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export default { manifest, create, detect } satisfies PluginModule<Agent>;
+export default { manifest, create } satisfies PluginModule<Agent>;

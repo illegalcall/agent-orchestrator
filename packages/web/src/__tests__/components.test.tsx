@@ -247,7 +247,7 @@ describe("SessionCard", () => {
     });
     const session = makeSession({ status: "mergeable", activity: "idle", pr });
     render(<SessionCard session={session} />);
-    expect(screen.getByRole("button", { name: /merge/i })).toBeInTheDocument();
+    expect(screen.getByText("Merge PR #42")).toBeInTheDocument();
   });
 
   it("calls onMerge when merge button is clicked", () => {
@@ -265,7 +265,7 @@ describe("SessionCard", () => {
     });
     const session = makeSession({ status: "mergeable", activity: "idle", pr });
     render(<SessionCard session={session} onMerge={onMerge} />);
-    fireEvent.click(screen.getByRole("button", { name: /merge/i }));
+    fireEvent.click(screen.getByText("Merge PR #42"));
     expect(onMerge).toHaveBeenCalledWith(42);
   });
 
@@ -396,7 +396,7 @@ describe("SessionCard", () => {
     expect(screen.getByText("ask to fix")).toBeInTheDocument();
   });
 
-  it("shows action buttons even when agent is active", () => {
+  it("hides action buttons when agent is active", () => {
     const pr = makePR({
       state: "open",
       ciStatus: "failing",
@@ -412,19 +412,24 @@ describe("SessionCard", () => {
     });
     const session = makeSession({ activity: "active", pr });
     render(<SessionCard session={session} />);
-    expect(screen.getByText("ask to fix")).toBeInTheDocument();
+    expect(screen.queryByText("ask to fix")).not.toBeInTheDocument();
   });
 
-  it("shows issue details in the compact card footer", () => {
+  it("expands detail panel on click", () => {
     const session = makeSession({ id: "test-1", issueId: "INT-100", pr: null });
-    render(<SessionCard session={session} />);
-    expect(screen.getAllByText("INT-100")).toHaveLength(2);
+    const { container } = render(<SessionCard session={session} />);
+    expect(screen.queryByText("INT-100")).not.toBeInTheDocument();
+    // Click the card (not a button/link)
+    fireEvent.click(container.firstElementChild!);
+    expect(screen.getByText("INT-100")).toBeInTheDocument();
+    expect(screen.getByText("No PR associated with this session.")).toBeInTheDocument();
   });
 
-  it("shows icon-only terminate button in the footer", () => {
+  it("shows terminate button in expanded view", () => {
     const session = makeSession({ pr: null });
-    render(<SessionCard session={session} />);
-    expect(screen.getByRole("button", { name: /terminate session/i })).toBeInTheDocument();
+    const { container } = render(<SessionCard session={session} />);
+    fireEvent.click(container.firstElementChild!);
+    expect(screen.getByText("terminate")).toBeInTheDocument();
   });
 });
 
@@ -439,9 +444,9 @@ describe("AttentionZone", () => {
     expect(screen.getByText("2")).toBeInTheDocument();
   });
 
-  it("renders empty state when sessions array is empty", () => {
-    render(<AttentionZone level="respond" sessions={[]} />);
-    expect(screen.getByText("No sessions")).toBeInTheDocument();
+  it("renders nothing when sessions array is empty", () => {
+    const { container } = render(<AttentionZone level="respond" sessions={[]} />);
+    expect(container.firstElementChild).toBeNull();
   });
 
   it("shows session cards when not collapsed", () => {
@@ -458,11 +463,27 @@ describe("AttentionZone", () => {
     expect(screen.getByText("Working")).toBeInTheDocument();
   });
 
-  it("done zone always shows sessions (kanban columns are always expanded)", () => {
+  it("done zone is collapsed by default", () => {
     const sessions = [makeSession({ id: "s1" })];
     render(<AttentionZone level="done" sessions={sessions} />);
+    // done is defaultCollapsed: true, so session id should not be visible
+    expect(screen.queryByText("s1")).not.toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
+  });
+
+  it("toggles collapsed state on click", () => {
+    const sessions = [makeSession({ id: "s1" })];
+    render(<AttentionZone level="done" sessions={sessions} />);
+    // done starts collapsed
+    expect(screen.queryByText("s1")).not.toBeInTheDocument();
+
+    // Click the zone header to expand
+    fireEvent.click(screen.getByText("Done"));
     expect(screen.getByText("s1")).toBeInTheDocument();
+
+    // Click again to collapse
+    fireEvent.click(screen.getByText("Done"));
+    expect(screen.queryByText("s1")).not.toBeInTheDocument();
   });
 
   it("passes callbacks to SessionCards", () => {

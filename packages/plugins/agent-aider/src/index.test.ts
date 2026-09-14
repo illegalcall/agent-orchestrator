@@ -89,7 +89,6 @@ describe("plugin manifest & exports", () => {
       slot: "agent",
       description: "Agent plugin: Aider",
       version: "0.1.0",
-      displayName: "Aider",
     });
   });
 

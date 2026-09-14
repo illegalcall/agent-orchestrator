@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono, JetBrains_Mono } from "next/font/google";
-import { ThemeProvider } from "next-themes";
+import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import { getProjectName } from "@/lib/project-name";
 import "./globals.css";
 
@@ -18,13 +17,6 @@ const ibmPlexMono = IBM_Plex_Mono({
   weight: ["300", "400", "500"],
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-jetbrains-mono",
-  display: "swap",
-  weight: ["400", "500"],
-});
-
 export async function generateMetadata(): Promise<Metadata> {
   const projectName = getProjectName();
   return {
@@ -38,11 +30,9 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`dark ${ibmPlexSans.variable} ${ibmPlexMono.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`dark ${ibmPlexSans.variable} ${ibmPlexMono.variable}`}>
       <body className="bg-[var(--color-bg-base)] text-[var(--color-text-primary)] antialiased">
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-          {children}
-        </ThemeProvider>
+        {children}
       </body>
     </html>
   );

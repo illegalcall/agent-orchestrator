@@ -188,7 +188,6 @@ describe("plugin manifest & exports", () => {
       slot: "agent",
       description: "Agent plugin: OpenAI Codex CLI",
       version: "0.1.1",
-      displayName: "OpenAI Codex",
     });
   });
 

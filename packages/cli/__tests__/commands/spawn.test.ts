@@ -135,7 +135,10 @@ afterEach(() => {
 });
 
 describe("spawn command", () => {
-  it("delegates to sessionManager.spawn() with auto-detected project", async () => {
+  it("delegates to sessionManager.spawn() instead of creating tmux sessions directly", async () => {
+    // This is the core regression test: spawn must delegate to sm.spawn(),
+    // not manually create tmux sessions with flat naming (which broke after
+    // the hash-based architecture migration).
     const fakeSession: Session = {
       id: "app-7",
       projectId: "my-app",
@@ -154,14 +157,14 @@ describe("spawn command", () => {
 
     mockSessionManager.spawn.mockResolvedValue(fakeSession);
 
-    // Single arg = issue; project is auto-detected (only one project in config)
-    await program.parseAsync(["node", "test", "spawn", "INT-100"]);
+    await program.parseAsync(["node", "test", "spawn", "my-app", "INT-100"]);
 
     expect(mockEnsureLifecycleWorker).toHaveBeenCalledWith(
       expect.objectContaining({ configPath: expect.any(String) }),
       "my-app",
     );
 
+    // Must delegate to session manager
     expect(mockSessionManager.spawn).toHaveBeenCalledWith({
       projectId: "my-app",
       issueId: "INT-100",
@@ -190,7 +193,7 @@ describe("spawn command", () => {
 
     mockSessionManager.spawn.mockResolvedValue(fakeSession);
 
-    await program.parseAsync(["node", "test", "spawn", "42"]);
+    await program.parseAsync(["node", "test", "spawn", "my-app", "42"]);
 
     expect(mockSessionManager.spawn).toHaveBeenCalledWith({
       projectId: "my-app",
@@ -217,8 +220,7 @@ describe("spawn command", () => {
 
     mockSessionManager.spawn.mockResolvedValue(fakeSession);
 
-    // No args: project auto-detected, no issue
-    await program.parseAsync(["node", "test", "spawn"]);
+    await program.parseAsync(["node", "test", "spawn", "my-app"]);
 
     expect(mockSessionManager.spawn).toHaveBeenCalledWith({
       projectId: "my-app",
@@ -227,6 +229,8 @@ describe("spawn command", () => {
   });
 
   it("shows tmux attach command using runtimeHandle.id (hash-based name)", async () => {
+    // Regression: tmux sessions use hash-based names (e.g., "8474d6f29887-app-7"),
+    // not flat names (e.g., "app-7"). The attach hint must use the runtime handle.
     const fakeSession: Session = {
       id: "app-7",
       projectId: "my-app",
@@ -245,9 +249,10 @@ describe("spawn command", () => {
 
     mockSessionManager.spawn.mockResolvedValue(fakeSession);
 
-    await program.parseAsync(["node", "test", "spawn"]);
+    await program.parseAsync(["node", "test", "spawn", "my-app"]);
 
     const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("\n");
+    // Must show the hash-based tmux name, not the flat session ID
     expect(output).toContain("8474d6f29887-app-7");
   });
 
@@ -270,7 +275,7 @@ describe("spawn command", () => {
 
     mockSessionManager.spawn.mockResolvedValue(fakeSession);
 
-    await program.parseAsync(["node", "test", "spawn", "--agent", "codex"]);
+    await program.parseAsync(["node", "test", "spawn", "my-app", "--agent", "codex"]);
 
     expect(mockSessionManager.spawn).toHaveBeenCalledWith({
       projectId: "my-app",
@@ -298,7 +303,7 @@ describe("spawn command", () => {
 
     mockSessionManager.spawn.mockResolvedValue(fakeSession);
 
-    await program.parseAsync(["node", "test", "spawn", "INT-42", "--agent", "codex"]);
+    await program.parseAsync(["node", "test", "spawn", "my-app", "INT-42", "--agent", "codex"]);
 
     expect(mockSessionManager.spawn).toHaveBeenCalledWith({
       projectId: "my-app",
@@ -307,23 +312,16 @@ describe("spawn command", () => {
     });
   });
 
-  it("warns and exits when two positional args given (old syntax)", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    await expect(
-      program.parseAsync(["node", "test", "spawn", "my-app", "INT-100"]),
-    ).rejects.toThrow("process.exit(1)");
-
-    const warnings = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(warnings).toContain("no longer supported");
-    expect(warnings).toContain("ao spawn INT-100");
-    warnSpy.mockRestore();
+  it("rejects unknown project ID", async () => {
+    await expect(program.parseAsync(["node", "test", "spawn", "nonexistent"])).rejects.toThrow(
+      "process.exit(1)",
+    );
   });
 
   it("reports error when spawn fails", async () => {
     mockSessionManager.spawn.mockRejectedValue(new Error("worktree creation failed"));
 
-    await expect(program.parseAsync(["node", "test", "spawn"])).rejects.toThrow(
+    await expect(program.parseAsync(["node", "test", "spawn", "my-app"])).rejects.toThrow(
       "process.exit(1)",
     );
   });
@@ -364,7 +362,7 @@ describe("spawn command", () => {
       takenOverFrom: [],
     });
 
-    await program.parseAsync(["node", "test", "spawn", "--claim-pr", "123"]);
+    await program.parseAsync(["node", "test", "spawn", "my-app", "--claim-pr", "123"]);
 
     expect(mockSessionManager.spawn).toHaveBeenCalledWith({
       projectId: "my-app",
@@ -420,6 +418,7 @@ describe("spawn command", () => {
       "node",
       "test",
       "spawn",
+      "my-app",
       "--claim-pr",
       "123",
       "--assign-on-github",
@@ -432,7 +431,7 @@ describe("spawn command", () => {
 
   it("rejects --assign-on-github without --claim-pr", async () => {
     await expect(
-      program.parseAsync(["node", "test", "spawn", "--assign-on-github"]),
+      program.parseAsync(["node", "test", "spawn", "my-app", "--assign-on-github"]),
     ).rejects.toThrow("process.exit(1)");
 
     const errors = vi
@@ -442,39 +441,6 @@ describe("spawn command", () => {
     expect(errors).toContain("--assign-on-github requires --claim-pr");
     expect(mockSessionManager.spawn).not.toHaveBeenCalled();
     expect(mockSessionManager.claimPR).not.toHaveBeenCalled();
-  });
-
-  it("shows dry-run output without spawning", async () => {
-    await program.parseAsync(["node", "test", "spawn", "INT-42", "--dry-run"]);
-
-    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
-    expect(mockEnsureLifecycleWorker).not.toHaveBeenCalled();
-
-    const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(output).toContain("Dry run");
-    expect(output).toContain("my-app");
-    expect(output).toContain("INT-42");
-  });
-
-  it("shows agent override in dry-run output", async () => {
-    await program.parseAsync(["node", "test", "spawn", "INT-42", "--dry-run", "--agent", "codex"]);
-
-    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
-
-    const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(output).toContain("Dry run");
-    expect(output).toContain("codex");
-  });
-
-  it("shows claim-pr in dry-run output", async () => {
-    await program.parseAsync(["node", "test", "spawn", "--dry-run", "--claim-pr", "99"]);
-
-    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
-    expect(mockSessionManager.claimPR).not.toHaveBeenCalled();
-
-    const output = consoleSpy.mock.calls.map((c) => String(c[0])).join("\n");
-    expect(output).toContain("Dry run");
-    expect(output).toContain("99");
   });
 
   it("reports claim failures after creating the session", async () => {
@@ -498,7 +464,7 @@ describe("spawn command", () => {
     mockSessionManager.claimPR.mockRejectedValue(new Error("already tracked by app-9"));
 
     await expect(
-      program.parseAsync(["node", "test", "spawn", "--claim-pr", "123"]),
+      program.parseAsync(["node", "test", "spawn", "my-app", "--claim-pr", "123"]),
     ).rejects.toThrow("process.exit(1)");
 
     const errors = vi
@@ -515,7 +481,7 @@ describe("spawn pre-flight checks", () => {
   it("fails with clear error when tmux is not installed (default runtime)", async () => {
     mockExec.mockRejectedValue(new Error("ENOENT"));
 
-    await expect(program.parseAsync(["node", "test", "spawn"])).rejects.toThrow(
+    await expect(program.parseAsync(["node", "test", "spawn", "my-app"])).rejects.toThrow(
       "process.exit(1)",
     );
 
@@ -524,6 +490,7 @@ describe("spawn pre-flight checks", () => {
       .mock.calls.map((c) => String(c[0]))
       .join("\n");
     expect(errors).toContain("tmux");
+    // Should not attempt to spawn
     expect(mockSessionManager.spawn).not.toHaveBeenCalled();
   });
 
@@ -556,7 +523,7 @@ describe("spawn pre-flight checks", () => {
     // exec would fail for tmux but should never be called
     mockExec.mockRejectedValue(new Error("ENOENT"));
 
-    await program.parseAsync(["node", "test", "spawn"]);
+    await program.parseAsync(["node", "test", "spawn", "my-app"]);
 
     expect(mockSessionManager.spawn).toHaveBeenCalled();
   });
@@ -574,7 +541,7 @@ describe("spawn pre-flight checks", () => {
       .mockResolvedValueOnce({ stdout: "gh version 2.40", stderr: "" }) // gh --version
       .mockRejectedValueOnce(new Error("not logged in")); // gh auth status
 
-    await expect(program.parseAsync(["node", "test", "spawn"])).rejects.toThrow(
+    await expect(program.parseAsync(["node", "test", "spawn", "my-app"])).rejects.toThrow(
       "process.exit(1)",
     );
 
@@ -600,7 +567,7 @@ describe("spawn pre-flight checks", () => {
       .mockRejectedValueOnce(new Error("not logged in"));
 
     await expect(
-      program.parseAsync(["node", "test", "spawn", "--claim-pr", "123"]),
+      program.parseAsync(["node", "test", "spawn", "my-app", "--claim-pr", "123"]),
     ).rejects.toThrow("process.exit(1)");
 
     const errors = vi
@@ -659,7 +626,7 @@ describe("spawn pre-flight checks", () => {
       .mockResolvedValueOnce({ stdout: "gh version 2.40", stderr: "" })
       .mockResolvedValueOnce({ stdout: "Logged in", stderr: "" });
 
-    await program.parseAsync(["node", "test", "spawn", "--claim-pr", "123"]);
+    await program.parseAsync(["node", "test", "spawn", "my-app", "--claim-pr", "123"]);
 
     expect(mockExec).toHaveBeenCalledWith("tmux", ["-V"]);
     const ghCalls = mockExec.mock.calls.filter(([command]) => command === "gh");
@@ -697,7 +664,7 @@ describe("spawn pre-flight checks", () => {
     // tmux check passes — gh should never be called
     mockExec.mockResolvedValue({ stdout: "tmux 3.3a", stderr: "" });
 
-    await program.parseAsync(["node", "test", "spawn"]);
+    await program.parseAsync(["node", "test", "spawn", "my-app"]);
 
     // Should only call tmux -V, not gh
     expect(mockExec).toHaveBeenCalledWith("tmux", ["-V"]);
@@ -717,7 +684,7 @@ describe("spawn pre-flight checks", () => {
       .mockResolvedValueOnce({ stdout: "tmux 3.3a", stderr: "" }) // tmux -V
       .mockRejectedValueOnce(new Error("ENOENT")); // gh --version fails
 
-    await expect(program.parseAsync(["node", "test", "spawn"])).rejects.toThrow(
+    await expect(program.parseAsync(["node", "test", "spawn", "my-app"])).rejects.toThrow(
       "process.exit(1)",
     );
 
@@ -728,4 +695,125 @@ describe("spawn pre-flight checks", () => {
     expect(errors).toContain("not installed");
     expect(errors).not.toContain("not authenticated");
   });
+  it("previews the existing project/issue command contract without side effects", async () => {
+    await program.parseAsync(["node", "test", "spawn", "my-app", "INT-42", "--dry-run"]);
+    const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain("Project: my-app");
+    expect(output).toContain("Issue: INT-42");
+    expect(output).toContain("Branch: feat/INT-42");
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockEnsureLifecycleWorker).not.toHaveBeenCalled();
+    expect(mockExec).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [undefined, "codex"],
+    ["aider", "aider"],
+  ])("uses project worker selection and explicit override %s", async (override, expected) => {
+    requireMockConfig()["projects"] = {
+      "my-app": {
+        name: "My App",
+        repo: "org/my-app",
+        path: tmpDir,
+        defaultBranch: "main",
+        sessionPrefix: "app",
+        agent: "claude-code",
+        worker: { agent: "codex" },
+      },
+    };
+    const args = ["node", "test", "spawn", "my-app", "--dry-run"];
+    if (override) args.push("--agent", override);
+    await program.parseAsync(args);
+    expect(consoleSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain(
+      `Agent: ${expected}`,
+    );
+  });
+
+  it("uses the default worker agent when the project has no agent", async () => {
+    requireMockConfig()["defaults"] = {
+      runtime: "tmux",
+      workspace: "worktree",
+      agent: "claude-code",
+      worker: { agent: "codex" },
+    };
+    await program.parseAsync(["node", "test", "spawn", "my-app", "--dry-run"]);
+    const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain("Agent: codex");
+    expect(output).toContain("Branch: session/<next-session-id>");
+  });
+
+  it("describes tracker branch resolution without contacting the tracker", async () => {
+    requireMockConfig()["projects"] = {
+      "my-app": {
+        name: "My App",
+        repo: "org/my-app",
+        path: tmpDir,
+        defaultBranch: "main",
+        sessionPrefix: "app",
+        tracker: { plugin: "github" },
+      },
+    };
+    await program.parseAsync([
+      "node",
+      "test",
+      "spawn",
+      "my-app",
+      "#42",
+      "--dry-run",
+      "--decompose",
+    ]);
+    const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain("github tracker branchName (resolved at spawn); fallback feat/42");
+    expect(output).toContain("subtasks resolved at spawn");
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockEnsureLifecycleWorker).not.toHaveBeenCalled();
+    expect(mockExec).not.toHaveBeenCalled();
+  });
+
+  it("previews a PR claim and terminal request without claiming or opening", async () => {
+    await program.parseAsync([
+      "node",
+      "test",
+      "spawn",
+      "my-app",
+      "--dry-run",
+      "--claim-pr",
+      "99",
+      "--open",
+    ]);
+    const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain("Claim PR: 99 (switches to PR branch after spawn)");
+    expect(output).toContain("Open terminal: yes");
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockSessionManager.claimPR).not.toHaveBeenCalled();
+    expect(mockExec).not.toHaveBeenCalled();
+  });
+  it("qualifies claim and open options when decomposition may create multiple sessions", async () => {
+    await program.parseAsync([
+      "node",
+      "test",
+      "spawn",
+      "my-app",
+      "INT-42",
+      "--dry-run",
+      "--decompose",
+      "--claim-pr",
+      "99",
+      "--open",
+    ]);
+    const lines = consoleSpy.mock.calls.map((call) => String(call[0]));
+    expect(lines.find((line) => line.includes("Claim PR:"))).toContain(
+      "single-session decomposition only",
+    );
+    expect(lines.find((line) => line.includes("Open terminal:"))).toContain(
+      "single-session decomposition only",
+    );
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockSessionManager.claimPR).not.toHaveBeenCalled();
+  });
 });
+
+function requireMockConfig(): Record<string, unknown> {
+  if (!mockConfigRef.current) throw new Error("Missing test config");
+  return mockConfigRef.current;
+}

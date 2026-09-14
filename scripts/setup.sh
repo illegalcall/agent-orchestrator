@@ -137,15 +137,7 @@ pnpm build
 echo ""
 echo "Linking CLI globally..."
 cd packages/cli
-if npm link 2>/dev/null; then
-  :
-elif [ "$INTERACTIVE" = true ]; then
-  echo "  Permission denied. Retrying with sudo..."
-  sudo npm link
-else
-  echo "ERROR: Permission denied. Run manually: cd packages/cli && sudo npm link"
-  exit 1
-fi
+npm link
 cd "$REPO_ROOT"
 
 # ─── Verify ao is in PATH ────────────────────────────────────────────────────
@@ -168,14 +160,8 @@ fi
 echo ""
 echo "Setup complete!"
 echo ""
-echo "What's next:"
-echo ""
-echo "  Navigate to your project directory and start:"
-echo ""
-echo "    cd ~/your-project"
-echo "    ao start            # auto-detects, creates config, launches dashboard"
-echo ""
-echo "  Want to add more projects later?"
-echo ""
-echo "    ao start ~/path/to/another-repo"
+echo "Next steps:"
+echo "  1. cd /path/to/your-project"
+echo "  2. ao init --auto"
+echo "  3. ao start"
 echo ""

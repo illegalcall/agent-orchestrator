@@ -15,7 +15,7 @@ import { resolve, join, basename } from "node:path";
 import { homedir } from "node:os";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { ConfigNotFoundError, type OrchestratorConfig } from "./types.js";
+import type { OrchestratorConfig } from "./types.js";
 import { generateSessionPrefix } from "./paths.js";
 
 function inferScmPlugin(project: {
@@ -467,7 +467,7 @@ export function loadConfig(configPath?: string): OrchestratorConfig {
   const path = configPath ?? findConfigFile();
 
   if (!path) {
-    throw new ConfigNotFoundError();
+    throw new Error("No agent-orchestrator.yaml found. Run `ao init` to create one.");
   }
 
   const raw = readFileSync(path, "utf-8");
@@ -488,7 +488,7 @@ export function loadConfigWithPath(configPath?: string): {
   const path = configPath ?? findConfigFile();
 
   if (!path) {
-    throw new ConfigNotFoundError();
+    throw new Error("No agent-orchestrator.yaml found. Run `ao init` to create one.");
   }
 
   const raw = readFileSync(path, "utf-8");
