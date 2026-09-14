@@ -29,8 +29,10 @@ Include:
 
 **Prerequisites**: Node.js 20+, pnpm 9.15+, Git 2.25+, tmux, gh CLI
 
+Fork the repository, then clone your fork:
+
 ```bash
-git clone https://github.com/ComposioHQ/agent-orchestrator.git
+git clone https://github.com/<your-username>/agent-orchestrator.git
 cd agent-orchestrator
 pnpm install
 pnpm build
