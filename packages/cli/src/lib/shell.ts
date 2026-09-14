@@ -1,17 +1,18 @@
-import { runCmd, tryRunCmd } from "@composio/ao-core";
+import { runCmd, tryRunCmd, type RunCmdOptions } from "@composio/ao-core";
 
 export type { RunCmdResult as ExecResult } from "@composio/ao-core";
 
 export async function exec(
   cmd: string,
   args: string[],
-  options?: { cwd?: string; env?: Record<string, string> },
+  options?: RunCmdOptions,
 ): Promise<{ stdout: string; stderr: string }> {
-  return runCmd(cmd, args, options);
+  // CLI operations include network clones; preserve the previous unbounded default.
+  return runCmd(cmd, args, { ...options, timeout: options?.timeout ?? 0 });
 }
 
 export async function execSilent(cmd: string, args: string[]): Promise<string | null> {
-  return tryRunCmd(cmd, args);
+  return tryRunCmd(cmd, args, { timeout: 0 });
 }
 
 export async function tmux(...args: string[]): Promise<string | null> {

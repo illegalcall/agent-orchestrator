@@ -23,7 +23,7 @@ export interface RunCmdOptions {
   env?: Record<string, string>;
   /**
    * Execution timeout in milliseconds.
-   * Defaults to 30 000 ms (30 s).
+   * Defaults to 30 000 ms (30 s). Set to 0 to disable the timeout.
    */
   timeout?: number;
   /**
