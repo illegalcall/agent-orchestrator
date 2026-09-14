@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotifyAction, OrchestratorEvent } from "@composio/ao-core";
 import { create, manifest } from "./index.js";
@@ -25,6 +26,22 @@ describe("notifier-openclaw", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it("keeps initialization diagnostics off machine-readable stdout", () => {
+    const moduleUrl = new URL("../dist/index.js", import.meta.url).href;
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { create } from ${JSON.stringify(moduleUrl)}; create({ token: "test-token" }); console.log(JSON.stringify([]));`,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([]);
+    expect(result.stderr).toContain("hello from Clawww");
   });
 
   it("has correct manifest", () => {
