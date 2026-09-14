@@ -76,7 +76,10 @@ vi.mock("@composio/ao-core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@composio/ao-core")>();
   return {
     ...actual,
-    loadConfig: () => mockConfigRef.current,
+    loadConfig: () => {
+      if (!mockConfigRef.current) throw new Error("No config found");
+      return mockConfigRef.current;
+    },
   };
 });
 
@@ -904,9 +907,7 @@ describe("status command", () => {
   });
 
   it("--quiet skips banner, headers, and footers", async () => {
-    mockSessionManager.list.mockResolvedValue([
-      makeSession({ id: "app-1", projectId: "my-app" }),
-    ]);
+    mockSessionManager.list.mockResolvedValue([makeSession({ id: "app-1", projectId: "my-app" })]);
 
     await program.parseAsync(["node", "test", "status", "--quiet"]);
 
@@ -915,5 +916,28 @@ describe("status command", () => {
     expect(output).not.toContain("Session");
     expect(output).not.toContain("Branch");
     expect(output).toBe("app-1");
+  });
+  it("--quiet keeps config-free fallback output to sorted session names", async () => {
+    mockConfigRef.current = null;
+    mockTmux.mockResolvedValue("session-z\nsession-a");
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+    expect(consoleSpy.mock.calls.map((call) => call[0])).toEqual(["session-a", "session-z"]);
+    expect(mockTmux).toHaveBeenCalledTimes(1);
+    expect(mockIntrospect).not.toHaveBeenCalled();
+    expect(mockSessionManager.list).not.toHaveBeenCalled();
+  });
+
+  it("--quiet prints nothing when config-free discovery has no sessions", async () => {
+    mockConfigRef.current = null;
+    mockTmux.mockResolvedValue(null);
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+    expect(consoleSpy).not.toHaveBeenCalled();
+  });
+
+  it("retains normal config-free fallback guidance", async () => {
+    mockConfigRef.current = null;
+    mockTmux.mockResolvedValue(null);
+    await program.parseAsync(["node", "test", "status"]);
+    expect(consoleSpy.mock.calls.map((call) => call[0]).join("\n")).toContain("No config found");
   });
 });

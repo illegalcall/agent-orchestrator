@@ -222,9 +222,11 @@ export function registerStatus(program: Command): void {
       try {
         config = loadConfig();
       } catch {
-        console.log(chalk.yellow("No config found. Run `ao init` first."));
-        console.log(chalk.dim("Falling back to session discovery...\n"));
-        await showFallbackStatus();
+        if (!opts.quiet) {
+          console.log(chalk.yellow("No config found. Run `ao init` first."));
+          console.log(chalk.dim("Falling back to session discovery...\n"));
+        }
+        await showFallbackStatus(opts.quiet);
         return;
       }
 
@@ -379,8 +381,12 @@ export function registerStatus(program: Command): void {
     });
 }
 
-async function showFallbackStatus(): Promise<void> {
+async function showFallbackStatus(quiet = false): Promise<void> {
   const allTmux = await getTmuxSessions();
+  if (quiet) {
+    for (const session of allTmux.sort()) console.log(session);
+    return;
+  }
   if (allTmux.length === 0) {
     console.log(chalk.dim("No tmux sessions found."));
     return;
