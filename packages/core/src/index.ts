@@ -175,3 +175,6 @@ export type {
   DetectedProjectInfo,
   GenerateConfigOptions,
 } from "./config-generator.js";
+
+export { resolveAgentSelection } from "./agent-selection.js";
+export { getFallbackBranchName } from "./utils/branch-name.js";

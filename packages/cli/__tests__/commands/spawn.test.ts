@@ -695,4 +695,125 @@ describe("spawn pre-flight checks", () => {
     expect(errors).toContain("not installed");
     expect(errors).not.toContain("not authenticated");
   });
+  it("previews the existing project/issue command contract without side effects", async () => {
+    await program.parseAsync(["node", "test", "spawn", "my-app", "INT-42", "--dry-run"]);
+    const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain("Project: my-app");
+    expect(output).toContain("Issue: INT-42");
+    expect(output).toContain("Branch: feat/INT-42");
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockEnsureLifecycleWorker).not.toHaveBeenCalled();
+    expect(mockExec).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [undefined, "codex"],
+    ["aider", "aider"],
+  ])("uses project worker selection and explicit override %s", async (override, expected) => {
+    requireMockConfig()["projects"] = {
+      "my-app": {
+        name: "My App",
+        repo: "org/my-app",
+        path: tmpDir,
+        defaultBranch: "main",
+        sessionPrefix: "app",
+        agent: "claude-code",
+        worker: { agent: "codex" },
+      },
+    };
+    const args = ["node", "test", "spawn", "my-app", "--dry-run"];
+    if (override) args.push("--agent", override);
+    await program.parseAsync(args);
+    expect(consoleSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain(
+      `Agent: ${expected}`,
+    );
+  });
+
+  it("uses the default worker agent when the project has no agent", async () => {
+    requireMockConfig()["defaults"] = {
+      runtime: "tmux",
+      workspace: "worktree",
+      agent: "claude-code",
+      worker: { agent: "codex" },
+    };
+    await program.parseAsync(["node", "test", "spawn", "my-app", "--dry-run"]);
+    const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain("Agent: codex");
+    expect(output).toContain("Branch: session/<next-session-id>");
+  });
+
+  it("describes tracker branch resolution without contacting the tracker", async () => {
+    requireMockConfig()["projects"] = {
+      "my-app": {
+        name: "My App",
+        repo: "org/my-app",
+        path: tmpDir,
+        defaultBranch: "main",
+        sessionPrefix: "app",
+        tracker: { plugin: "github" },
+      },
+    };
+    await program.parseAsync([
+      "node",
+      "test",
+      "spawn",
+      "my-app",
+      "#42",
+      "--dry-run",
+      "--decompose",
+    ]);
+    const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain("github tracker branchName (resolved at spawn); fallback feat/42");
+    expect(output).toContain("subtasks resolved at spawn");
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockEnsureLifecycleWorker).not.toHaveBeenCalled();
+    expect(mockExec).not.toHaveBeenCalled();
+  });
+
+  it("previews a PR claim and terminal request without claiming or opening", async () => {
+    await program.parseAsync([
+      "node",
+      "test",
+      "spawn",
+      "my-app",
+      "--dry-run",
+      "--claim-pr",
+      "99",
+      "--open",
+    ]);
+    const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(output).toContain("Claim PR: 99 (switches to PR branch after spawn)");
+    expect(output).toContain("Open terminal: yes");
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockSessionManager.claimPR).not.toHaveBeenCalled();
+    expect(mockExec).not.toHaveBeenCalled();
+  });
+  it("qualifies claim and open options when decomposition may create multiple sessions", async () => {
+    await program.parseAsync([
+      "node",
+      "test",
+      "spawn",
+      "my-app",
+      "INT-42",
+      "--dry-run",
+      "--decompose",
+      "--claim-pr",
+      "99",
+      "--open",
+    ]);
+    const lines = consoleSpy.mock.calls.map((call) => String(call[0]));
+    expect(lines.find((line) => line.includes("Claim PR:"))).toContain(
+      "single-session decomposition only",
+    );
+    expect(lines.find((line) => line.includes("Open terminal:"))).toContain(
+      "single-session decomposition only",
+    );
+    expect(mockSessionManager.spawn).not.toHaveBeenCalled();
+    expect(mockSessionManager.claimPR).not.toHaveBeenCalled();
+  });
 });
+
+function requireMockConfig(): Record<string, unknown> {
+  if (!mockConfigRef.current) throw new Error("Missing test config");
+  return mockConfigRef.current;
+}

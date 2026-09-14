@@ -3,6 +3,8 @@ import ora from "ora";
 import type { Command } from "commander";
 import {
   loadConfig,
+  resolveAgentSelection,
+  getFallbackBranchName,
   decompose,
   getLeaves,
   getSiblings,
@@ -130,6 +132,7 @@ export function registerSpawn(program: Command): void {
     .option("--assign-on-github", "Assign the claimed PR to the authenticated GitHub user")
     .option("--decompose", "Decompose issue into subtasks before spawning")
     .option("--max-depth <n>", "Max decomposition depth (default: 3)")
+    .option("--dry-run", "Preview spawn configuration without creating a session")
     .action(
       async (
         projectId: string,
@@ -141,6 +144,7 @@ export function registerSpawn(program: Command): void {
           assignOnGithub?: boolean;
           decompose?: boolean;
           maxDepth?: string;
+          dryRun?: boolean;
         },
       ) => {
         const config = loadConfig();
@@ -162,6 +166,39 @@ export function registerSpawn(program: Command): void {
           claimPr: opts.claimPr,
           assignOnGithub: opts.assignOnGithub,
         };
+
+        if (opts.dryRun) {
+          const project = config.projects[projectId];
+          const selection = resolveAgentSelection({
+            role: "worker",
+            project,
+            defaults: config.defaults,
+            spawnAgentOverride: opts.agent,
+          });
+          const fallbackBranch = getFallbackBranchName(issueId, "<next-session-id>");
+          const branch =
+            issueId && project.tracker
+              ? `${project.tracker.plugin} tracker branchName (resolved at spawn); fallback ${fallbackBranch}`
+              : fallbackBranch;
+          console.log(chalk.bold("Dry run — no session will be created"));
+          console.log(`  Project: ${projectId}`);
+          if (issueId) console.log(`  Issue: ${issueId}`);
+          console.log(`  Agent: ${selection.agentName}`);
+          console.log(`  Runtime: ${project.runtime ?? config.defaults.runtime}`);
+          console.log(`  Workspace: ${project.workspace ?? config.defaults.workspace}`);
+          console.log(`  Branch: ${branch}`);
+          if (opts.claimPr)
+            console.log(
+              `  Claim PR: ${opts.claimPr} (switches to PR branch after spawn)${opts.decompose && issueId ? " — single-session decomposition only" : ""}`,
+            );
+          if (opts.decompose && issueId)
+            console.log("  Decompose: yes (subtasks resolved at spawn)");
+          if (opts.open)
+            console.log(
+              `  Open terminal: yes${opts.decompose && issueId ? " — single-session decomposition only" : ""}`,
+            );
+          return;
+        }
 
         try {
           await runSpawnPreflight(config, projectId, claimOptions);

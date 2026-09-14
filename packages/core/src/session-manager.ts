@@ -11,6 +11,7 @@
  * Reference: scripts/claude-ao-session, scripts/send-to-session
  */
 
+import { getFallbackBranchName } from "./utils/branch-name.js";
 import { statSync, existsSync, readdirSync, writeFileSync, mkdirSync, utimesSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { basename, join, resolve } from "node:path";
@@ -953,21 +954,8 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
       branch = spawnConfig.branch;
     } else if (spawnConfig.issueId && plugins.tracker && resolvedIssue) {
       branch = plugins.tracker.branchName(spawnConfig.issueId, project);
-    } else if (spawnConfig.issueId) {
-      // If the issueId is already branch-safe (e.g. "INT-9999"), use as-is.
-      // Otherwise sanitize free-text (e.g. "fix login bug") into a valid slug.
-      const id = spawnConfig.issueId;
-      const isBranchSafe = /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id) && !id.includes("..");
-      const slug = isBranchSafe
-        ? id
-        : id
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "-")
-            .slice(0, 60)
-            .replace(/^-+|-+$/g, "");
-      branch = `feat/${slug || sessionId}`;
     } else {
-      branch = `session/${sessionId}`;
+      branch = getFallbackBranchName(spawnConfig.issueId, sessionId);
     }
 
     // Create workspace (if workspace plugin is available)
