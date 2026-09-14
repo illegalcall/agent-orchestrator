@@ -1,33 +1,18 @@
-import { execFile as execFileCb } from "node:child_process";
-import { promisify } from "node:util";
+import { runCmd, tryRunCmd, type RunCmdOptions } from "@composio/ao-core";
 
-const execFileAsync = promisify(execFileCb);
-
-export interface ExecResult {
-  stdout: string;
-  stderr: string;
-}
+export type { RunCmdResult as ExecResult } from "@composio/ao-core";
 
 export async function exec(
   cmd: string,
   args: string[],
-  options?: { cwd?: string; env?: Record<string, string> },
-): Promise<ExecResult> {
-  const { stdout, stderr } = await execFileAsync(cmd, args, {
-    cwd: options?.cwd,
-    env: options?.env ? { ...process.env, ...options.env } : undefined,
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  return { stdout: stdout.trimEnd(), stderr: stderr.trimEnd() };
+  options?: RunCmdOptions,
+): Promise<{ stdout: string; stderr: string }> {
+  // CLI operations include network clones; preserve the previous unbounded default.
+  return runCmd(cmd, args, { ...options, timeout: options?.timeout ?? 0 });
 }
 
 export async function execSilent(cmd: string, args: string[]): Promise<string | null> {
-  try {
-    const { stdout } = await exec(cmd, args);
-    return stdout;
-  } catch {
-    return null;
-  }
+  return tryRunCmd(cmd, args, { timeout: 0 });
 }
 
 export async function tmux(...args: string[]): Promise<string | null> {

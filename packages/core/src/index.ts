@@ -95,6 +95,8 @@ export {
   normalizeRetryConfig,
   readLastJsonlEntry,
 } from "./utils.js";
+export { runCmd, tryRunCmd } from "./utils/run-cmd.js";
+export type { RunCmdOptions, RunCmdResult } from "./utils/run-cmd.js";
 export {
   getWebhookHeader,
   parseWebhookJsonObject,
