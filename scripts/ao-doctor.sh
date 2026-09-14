@@ -113,12 +113,13 @@ ensure_dir() {
   local dir_path="$1"
   local label="$2"
   local fix_hint="$3"
+  local auto_create="${4:-false}"
   if [ -d "$dir_path" ]; then
     pass "$label exists at $dir_path"
     return 0
   fi
 
-  if [ "$FIX_MODE" = true ]; then
+  if [ "$FIX_MODE" = true ] || [ "$auto_create" = true ]; then
     if mkdir -p "$dir_path"; then
       fixed "$label created at $dir_path"
       return 0
@@ -288,8 +289,8 @@ check_config_dirs() {
   data_dir="$(expand_home "$data_dir")"
   worktree_dir="$(expand_home "$worktree_dir")"
 
-  ensure_dir "$data_dir" "metadata directory" "mkdir -p $data_dir"
-  ensure_dir "$worktree_dir" "worktree directory" "mkdir -p $worktree_dir"
+  ensure_dir "$data_dir" "metadata directory" "mkdir -p $data_dir" true
+  ensure_dir "$worktree_dir" "worktree directory" "mkdir -p $worktree_dir" true
 }
 
 check_stale_temp_files() {
