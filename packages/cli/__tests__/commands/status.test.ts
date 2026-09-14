@@ -76,7 +76,10 @@ vi.mock("@composio/ao-core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@composio/ao-core")>();
   return {
     ...actual,
-    loadConfig: () => mockConfigRef.current,
+    loadConfig: () => {
+      if (!mockConfigRef.current) throw new Error("No config found");
+      return mockConfigRef.current;
+    },
   };
 });
 
@@ -829,5 +832,112 @@ describe("status command", () => {
       role: "worker",
       project: "my-app",
     });
+  });
+
+  it("includes age field in JSON output computed from session createdAt", async () => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    mockSessionManager.list.mockResolvedValue([
+      makeSession({
+        id: "app-1",
+        projectId: "my-app",
+        branch: "feat/age-test",
+        createdAt: twoHoursAgo,
+      }),
+    ]);
+    mockGit.mockResolvedValue(null);
+
+    await program.parseAsync(["node", "test", "status", "--json"]);
+
+    const jsonCalls = consoleSpy.mock.calls.map((c) => c[0]).join("");
+    const parsed = JSON.parse(jsonCalls);
+    expect(parsed[0].age).toBe("2h ago");
+  });
+
+  it("shows session age in table output", async () => {
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+    mockSessionManager.list.mockResolvedValue([
+      makeSession({
+        id: "app-1",
+        projectId: "my-app",
+        branch: "feat/age-display",
+        createdAt: thirtyMinutesAgo,
+      }),
+    ]);
+    mockGit.mockResolvedValue(null);
+    mockTmux.mockResolvedValue(null);
+
+    await program.parseAsync(["node", "test", "status"]);
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).toContain("30m ago");
+  });
+
+  it("--quiet outputs only session names, one per line", async () => {
+    mockSessionManager.list.mockResolvedValue([
+      makeSession({ id: "app-1", projectId: "my-app" }),
+      makeSession({ id: "app-2", projectId: "my-app" }),
+      makeSession({ id: "app-3", projectId: "my-app" }),
+    ]);
+
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+    const lines = consoleSpy.mock.calls.map((c) => c[0]);
+    expect(lines).toEqual(["app-1", "app-2", "app-3"]);
+  });
+
+  it("--quiet outputs nothing when there are no sessions", async () => {
+    mockSessionManager.list.mockResolvedValue([]);
+
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+    expect(consoleSpy).not.toHaveBeenCalled();
+  });
+
+  it("--quiet outputs sessions sorted alphabetically", async () => {
+    mockSessionManager.list.mockResolvedValue([
+      makeSession({ id: "app-3", projectId: "my-app" }),
+      makeSession({ id: "app-1", projectId: "my-app" }),
+      makeSession({ id: "app-2", projectId: "my-app" }),
+    ]);
+
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+    const lines = consoleSpy.mock.calls.map((c) => c[0]);
+    expect(lines).toEqual(["app-1", "app-2", "app-3"]);
+  });
+
+  it("--quiet skips banner, headers, and footers", async () => {
+    mockSessionManager.list.mockResolvedValue([makeSession({ id: "app-1", projectId: "my-app" })]);
+
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+
+    const output = consoleSpy.mock.calls.map((c) => c[0]).join("\n");
+    expect(output).not.toContain("AGENT ORCHESTRATOR STATUS");
+    expect(output).not.toContain("Session");
+    expect(output).not.toContain("Branch");
+    expect(output).toBe("app-1");
+  });
+  it("--quiet keeps config-free fallback output to sorted session names", async () => {
+    mockConfigRef.current = null;
+    mockTmux.mockResolvedValue("session-z\nsession-a");
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+    expect(consoleSpy.mock.calls.map((call) => call[0])).toEqual(["session-a", "session-z"]);
+    expect(mockTmux).toHaveBeenCalledTimes(1);
+    expect(mockIntrospect).not.toHaveBeenCalled();
+    expect(mockSessionManager.list).not.toHaveBeenCalled();
+  });
+
+  it("--quiet prints nothing when config-free discovery has no sessions", async () => {
+    mockConfigRef.current = null;
+    mockTmux.mockResolvedValue(null);
+    await program.parseAsync(["node", "test", "status", "--quiet"]);
+    expect(consoleSpy).not.toHaveBeenCalled();
+  });
+
+  it("retains normal config-free fallback guidance", async () => {
+    mockConfigRef.current = null;
+    mockTmux.mockResolvedValue(null);
+    await program.parseAsync(["node", "test", "status"]);
+    expect(consoleSpy.mock.calls.map((call) => call[0]).join("\n")).toContain("No config found");
   });
 });

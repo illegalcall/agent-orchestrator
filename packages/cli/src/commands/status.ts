@@ -37,6 +37,8 @@ interface SessionInfo {
   prNumber: number | null;
   issue: string | null;
   lastActivity: string;
+  /** Human-readable session age (time since session was created/started) */
+  age: string;
   project: string | null;
   ciStatus: CIStatus | null;
   reviewDecision: ReviewDecision | null;
@@ -118,6 +120,9 @@ async function gatherSessionInfo(
     }
   }
 
+  // Calculate session age from createdAt timestamp
+  const age = formatAge(session.createdAt.getTime());
+
   return {
     name: session.id,
     role: isOrchestratorSession(session) ? "orchestrator" : "worker",
@@ -129,6 +134,7 @@ async function gatherSessionInfo(
     prNumber,
     issue,
     lastActivity,
+    age,
     project: session.projectId,
     ciStatus,
     reviewDecision,
@@ -181,7 +187,7 @@ function printSessionRow(info: SessionInfo): void {
       COL.threads,
     ) +
     padCol(activityIcon(info.activity), COL.activity) +
-    chalk.dim(info.lastActivity);
+    chalk.dim(info.age);
 
   console.log(`  ${row}`);
 
@@ -210,14 +216,17 @@ export function registerStatus(program: Command): void {
     .description("Show all sessions with branch, activity, PR, and CI status")
     .option("-p, --project <id>", "Filter by project ID")
     .option("--json", "Output as JSON")
-    .action(async (opts: { project?: string; json?: boolean }) => {
+    .option("-q, --quiet", "Output only session names, one per line (for scripting)")
+    .action(async (opts: { project?: string; json?: boolean; quiet?: boolean }) => {
       let config: ReturnType<typeof loadConfig>;
       try {
         config = loadConfig();
       } catch {
-        console.log(chalk.yellow("No config found. Run `ao init` first."));
-        console.log(chalk.dim("Falling back to session discovery...\n"));
-        await showFallbackStatus();
+        if (!opts.quiet) {
+          console.log(chalk.yellow("No config found. Run `ao init` first."));
+          console.log(chalk.dim("Falling back to session discovery...\n"));
+        }
+        await showFallbackStatus(opts.quiet);
         return;
       }
 
@@ -229,6 +238,14 @@ export function registerStatus(program: Command): void {
       // Use session manager to list sessions (metadata-based, not tmux-based)
       const sm = await getSessionManager(config);
       const sessions = await sm.list(opts.project);
+
+      // --quiet mode: just print session names, one per line (no headers, no table)
+      if (opts.quiet) {
+        for (const s of sessions.sort((a, b) => a.id.localeCompare(b.id))) {
+          console.log(s.id);
+        }
+        return;
+      }
 
       if (!opts.json) {
         console.log(banner("AGENT ORCHESTRATOR STATUS"));
@@ -364,8 +381,12 @@ export function registerStatus(program: Command): void {
     });
 }
 
-async function showFallbackStatus(): Promise<void> {
+async function showFallbackStatus(quiet = false): Promise<void> {
   const allTmux = await getTmuxSessions();
+  if (quiet) {
+    for (const session of allTmux.sort()) console.log(session);
+    return;
+  }
   if (allTmux.length === 0) {
     console.log(chalk.dim("No tmux sessions found."));
     return;
