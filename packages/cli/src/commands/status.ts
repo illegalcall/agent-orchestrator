@@ -216,7 +216,7 @@ export function registerStatus(program: Command): void {
         config = loadConfig();
       } catch {
         if (opts.json) {
-          console.log(JSON.stringify({ sessions: [] }));
+          console.log(JSON.stringify([]));
           return;
         }
         console.log(chalk.yellow("No config found. Run `ao init` first."));
@@ -318,7 +318,7 @@ export function registerStatus(program: Command): void {
       }
 
       if (opts.json) {
-        console.log(JSON.stringify({ sessions: jsonOutput }, null, 2));
+        console.log(JSON.stringify(jsonOutput, null, 2));
         return;
       } else {
         console.log(

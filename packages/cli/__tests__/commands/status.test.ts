@@ -76,7 +76,10 @@ vi.mock("@composio/ao-core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@composio/ao-core")>();
   return {
     ...actual,
-    loadConfig: () => mockConfigRef.current,
+    loadConfig: () => {
+      if (!mockConfigRef.current) throw new Error("No config found");
+      return mockConfigRef.current;
+    },
   };
 });
 
@@ -267,6 +270,35 @@ afterEach(() => {
 });
 
 describe("status command", () => {
+  it("returns only an empty JSON array when configuration is missing", async () => {
+    mockConfigRef.current = null;
+    mockTmux.mockResolvedValue("unconfigured-session");
+
+    await program.parseAsync(["node", "test", "status", "--json"]);
+
+    expect(JSON.parse(consoleSpy.mock.calls.map((call) => call[0]).join("\n"))).toEqual([]);
+    expect(mockTmux).not.toHaveBeenCalled();
+    expect(mockSessionManager.list).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty JSON array for a configured project without sessions", async () => {
+    await program.parseAsync(["node", "test", "status", "--json"]);
+
+    expect(JSON.parse(consoleSpy.mock.calls.map((call) => call[0]).join("\n"))).toEqual([]);
+  });
+
+  it("keeps normal discovery output when configuration is missing", async () => {
+    mockConfigRef.current = null;
+    mockTmux.mockResolvedValue(null);
+
+    await program.parseAsync(["node", "test", "status"]);
+
+    const output = consoleSpy.mock.calls.map((call) => call[0]).join("\n");
+    expect(output).toContain("No config found");
+    expect(output).toContain("Falling back to session discovery");
+    expect(mockTmux).toHaveBeenCalled();
+  });
+
   it("shows banner and project header", async () => {
     mockTmux.mockResolvedValue(null);
 
