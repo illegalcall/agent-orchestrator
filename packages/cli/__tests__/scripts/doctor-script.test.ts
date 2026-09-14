@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
+  accessSync,
+  constants,
   chmodSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -14,18 +17,35 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-/**
- * Build a PATH string that places `binDir` first and strips any system
- * directories that contain an `ao` binary.  This prevents a globally-installed
- * `ao` (e.g. /usr/local/bin/ao) from masking the absence of the launcher
- * inside the fake bin directory during tests that exercise the launcher-fix
- * code path.
- */
+/** Expose only the script's shell utilities, never an inherited ao launcher. */
 function buildIsolatedPath(binDir: string): string {
-  const systemPaths = (process.env["PATH"] ?? "")
-    .split(":")
-    .filter((p) => p.length > 0 && !existsSync(join(p, "ao")));
-  return [binDir, ...systemPaths].join(":");
+  for (const name of [
+    "bash",
+    "cat",
+    "cut",
+    "dirname",
+    "find",
+    "grep",
+    "head",
+    "mkdir",
+    "tr",
+    "wc",
+    "xargs",
+  ]) {
+    const source = ["/usr/bin", "/bin"]
+      .map((dir) => join(dir, name))
+      .find((path) => {
+        try {
+          accessSync(path, constants.X_OK);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    if (!source) throw new Error(`Required doctor fixture utility is unavailable: ${name}`);
+    symlinkSync(source, join(binDir, name));
+  }
+  return binDir;
 }
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -112,11 +132,12 @@ describe("scripts/ao-doctor.sh", () => {
     const result = spawnSync("bash", [scriptPath], {
       env: {
         ...process.env,
-        PATH: `${binDir}:${process.env.PATH || ""}`,
+        PATH: buildIsolatedPath(binDir),
         AO_REPO_ROOT: fakeRepo,
         AO_CONFIG_PATH: configPath,
       },
       encoding: "utf8",
+      timeout: 20_000,
     });
 
     rmSync(tempRoot, { recursive: true, force: true });
@@ -169,6 +190,7 @@ describe("scripts/ao-doctor.sh", () => {
         AO_DOCTOR_TMP_ROOT: tmpRoot,
       },
       encoding: "utf8",
+      timeout: 20_000,
     });
 
     const npmCommands = readFileSync(npmLog, "utf8");
