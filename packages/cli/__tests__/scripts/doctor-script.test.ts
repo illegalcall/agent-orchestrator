@@ -24,6 +24,7 @@ function buildIsolatedPath(binDir: string): string {
     "cat",
     "cut",
     "dirname",
+    "echo", // GNU xargs resolves its default command through PATH.
     "find",
     "grep",
     "head",
