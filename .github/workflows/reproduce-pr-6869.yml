@@ -1,0 +1,103 @@
+name: PR 6869 native reproduction evidence
+
+on:
+  push:
+    branches: [codex/replicate-pr-6869]
+
+permissions:
+  contents: read
+
+jobs:
+  native-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: backend
+    env:
+      AO_TELEMETRY_REMOTE: 'off'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Prepare isolated evidence and real AO binary
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP 'pr6869-evidence'
+          New-Item -ItemType Directory -Force $evidence | Out-Null
+          "AO_REVIEW6869_EVIDENCE=$evidence" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $binary = Join-Path $evidence 'ao.exe'
+          go build -o $binary ./cmd/ao
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "AO_REVIEW6869_AO_BIN=$binary" | Out-File -FilePath $env:GITHUB_ENV -Append
+          go version | Tee-Object -FilePath (Join-Path $evidence 'runtime.txt')
+          git rev-parse HEAD | Tee-Object -FilePath (Join-Path $evidence 'test-commit.txt')
+          'Production implementation is PR head 07fc6e1df64c0c7514b457df852deac45906eb36; only reproduction tests/workflow added.' | Out-File (Join-Path $evidence 'scope.txt')
+      - name: Current PR legacy adoption with real processes
+        id: head
+        continue-on-error: true
+        env:
+          AO_REVIEW6869_EXPECT: head
+        run: |
+          go test -count=1 -v -timeout=5m -run '^TestReview6869WindowsNativeLegacySwitchRecovery$' ./internal/session_manager 2>&1 | Tee-Object -FilePath (Join-Path $env:AO_REVIEW6869_EVIDENCE 'head-adoption.log')
+          $code = $LASTEXITCODE
+          "head_adoption_exit=$code" | Out-File (Join-Path $env:AO_REVIEW6869_EVIDENCE 'head-adoption-exit.txt')
+          exit $code
+      - name: Generate exact-base runtime overlay
+        run: |
+          @'
+          import json, os, subprocess
+          from pathlib import Path
+          root=Path(os.environ['GITHUB_WORKSPACE'])
+          out=Path(os.environ['AO_REVIEW6869_EVIDENCE'])
+          replace={}
+          for relative in ['backend/internal/adapters/runtime/conpty/runtime.go','backend/internal/adapters/runtime/conpty/ptyregistry/registry.go']:
+              data=subprocess.check_output(['git','show','b7931495f25cd3d254521099fd0cbd098de1c3a7:'+relative])
+              target=out/('base-'+Path(relative).name)
+              target.write_bytes(data)
+              replace[str((root/relative).resolve())]=str(target.resolve())
+          (out/'base-overlay.json').write_text(json.dumps({'Replace':replace},indent=2))
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Base runtime legacy adoption with the same real-process fixture
+        id: base
+        continue-on-error: true
+        env:
+          AO_REVIEW6869_EXPECT: base-runtime
+        run: |
+          $overlay = Join-Path $env:AO_REVIEW6869_EVIDENCE 'base-overlay.json'
+          go test "-overlay=$overlay" -count=1 -v -timeout=5m -run '^TestReview6869WindowsNativeLegacySwitchRecovery$' ./internal/session_manager 2>&1 | Tee-Object -FilePath (Join-Path $env:AO_REVIEW6869_EVIDENCE 'base-adoption.log')
+          $code = $LASTEXITCODE
+          "base_adoption_exit=$code" | Out-File (Join-Path $env:AO_REVIEW6869_EVIDENCE 'base-adoption-exit.txt')
+          exit $code
+      - name: Native kernel PID reuse attempt
+        id: ppid
+        continue-on-error: true
+        env:
+          AO_REVIEW_NATIVE_WINDOWS: '1'
+        run: |
+          go test -count=1 -v -timeout=4m -run '^TestReviewWindowsNativeReusedParentPID$' ./internal/adapters/runtime/conpty 2>&1 | Tee-Object -FilePath (Join-Path $env:AO_REVIEW6869_EVIDENCE 'native-ppid.log')
+          $code = $LASTEXITCODE
+          "native_ppid_exit=$code" | Out-File (Join-Path $env:AO_REVIEW6869_EVIDENCE 'native-ppid-exit.txt')
+          exit $code
+      - name: Explain evidence semantics
+        if: always()
+        run: |
+          @'
+          These are reproduction experiments, not PR approval checks.
+          The adoption tests assert their selected mode: head reproduces blocked recovery; base-runtime expects recovery to resolve.
+          A PID-reuse assertion failure reproduces the ancestry bug. An explicit INCONCLUSIVE skip does not reproduce it.
+          No Process32Next enumeration error is injected here; that separate concern remains a fault-injection model only.
+          '@ | Out-File (Join-Path $env:AO_REVIEW6869_EVIDENCE 'READ-ME.txt')
+          Get-Content (Join-Path $env:AO_REVIEW6869_EVIDENCE 'READ-ME.txt') | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr6869-native-windows-evidence
+          path: ${{ runner.temp }}/pr6869-evidence
+          if-no-files-found: warn
+          retention-days: 7
